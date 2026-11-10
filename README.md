@@ -15,13 +15,16 @@ MIDI 远程控制器。从远程曲库拉取 MIDI 文件，实时推送到本地
 | 网络 | `reqwest`（Windows SChannel，无需 OpenSSL） |
 | 更新 | `tauri-plugin-updater`（minisign 签名） |
 
-## 为什么用 GNU 工具链
+## 为什么本地用 GNU 工具链
 
-开发机没有 MSVC / VS Build Tools，也没有管理员权限，因此项目固定使用 `stable-x86_64-pc-windows-gnu`，链接器由便携版 mingw-w64 提供：
+开发机没有 MSVC / VS Build Tools，也没有管理员权限，所以**本机**走 `stable-x86_64-pc-windows-gnu`，链接器由便携版 mingw-w64 提供。仓库里**不再**用 `rust-toolchain.toml` 钉死工具链——那会让 CI（runner 自带 MSVC）也被迫下载 gnu 工具链再去找 mingw。现在由 `scripts/run.mjs` 运行时决定：
 
-- `src-tauri/rust-toolchain.toml` 钉住 gnu 工具链，进入目录即自动生效
-- `src-tauri/.cargo/config.toml` 指定 `x86_64-w64-mingw32-gcc` 作为链接器
-- mingw 装在 `%USERPROFILE%\.mingw64`，不需要管理员权限，也不污染系统 PATH
+| 环境 | 检测结果 | 行为 |
+|---|---|---|
+| 开发机 | 找到 `%USERPROFILE%\.mingw64\mingw64\bin` | 前置进 PATH，`RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-gnu` |
+| GitHub Actions | 找不到 mingw | 不干预，cargo 用 runner 默认的 `stable-x86_64-pc-windows-msvc` |
+
+`src-tauri/.cargo/config.toml` 里只有 `[target.x86_64-pc-windows-gnu]` 一节，对 msvc 目标完全无效，所以两种环境共用一份配置。
 
 ## 快速开始
 
@@ -44,7 +47,7 @@ npm run app:build
 > `npm run setup:mingw` 从清华 MSYS2 镜像拉取官方包。不用 winlibs 是因为它的
 > GitHub Releases 在国内常被限速到几十 KB/s，263 MB 要跑数小时。
 
-如果想用自己已有的 mingw，设置环境变量后即可：
+如果想用自己已有的 mingw，设置环境变量后即可（路径里有 `gcc` 就会自动切 gnu 工具链）：
 
 ```bash
 MIDITOOL_MINGW=D:\mingw64\bin npm run app:build
@@ -85,17 +88,15 @@ git tag "v$(node -p "require('./package.json').version")"
 git push origin main --tags
 ```
 
-`release.yml` 会用 gnu 工具链构建，自动上传安装包、`.exe.sig` 和 `latest.json`。
+`release.yml` 自动上传安装包、`.exe.sig` 和 `latest.json`。
 客户端「检查更新」读取的正是 `releases/latest/download/latest.json`。
 
-CI 上没有便携 mingw（那是本地用来绕开 MSVC 的），改由 MSYS2 的 UCRT64 工具链提供链接器，
-workflow 里用 `MIDITOOL_MINGW: C:\msys64\ucrt64\bin` 告诉 `scripts/run.mjs` 去哪找 gcc。
-`run.mjs` 的判断顺序是「`MIDITOOL_MINGW` → `~/.mingw64` → 系统 PATH」，三者都找不到才报错，
-所以同一份脚本在本地和 Actions 上都能跑；PATH 上只有裸 `gcc`/`ar` 时会用
-`CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER` 覆盖 `.cargo/config.toml` 里的三元组名字。
+CI 侧和 lan-room 完全一致：**不装 mingw、不切工具链**，就用 `windows-latest` 自带的 MSVC。
+`run.mjs` 找不到 mingw 时会打印「CI / MSVC 模式」并原样调用 tauri，所以同一份脚本在两边都能跑。
+workflow 里额外加了一步「tag 与 `tauri.conf.json` 版本一致」的校验——版本对不上会让
+`latest.json` 指向错误的安装包，不如在编译前就 fail 掉。
 
-workflow 会在编译前先校验 mingw、rustc 和 tag 与 `tauri.conf.json` 版本是否一致——
-版本对不上时 `latest.json` 会指向错误的安装包，所以在第一步就 fail 掉。
+> 改 workflow 之后必须重打 tag 再推，因为 tag 触发的流水线用的是**该 tag 指向提交里**的 YAML。
 
 如果想在本地手动传 Release，打完包后执行 `npm run release:latest`，
 它会在 `src-tauri/target/release/bundle/nsis/` 下生成 `latest.json`，

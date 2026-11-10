@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 /**
- * 包装 tauri CLI：
- *  1. 自动定位可用的 mingw（便携版 → 环境变量 → 系统 PATH），都找不到才报错
- *  2. 载入 .env.local（存在时），使本地构建也能读到签名密钥
+ * 包装 tauri CLI，抹平「本机」和「CI」的工具链差异：
+ *
+ *   本机：没有 MSVC，靠便携 mingw + windows-gnu 工具链
+ *   CI  ：runner 自带 MSVC，不碰 mingw（与 lan-room 的 workflow 一致）
+ *
+ * 判断依据是「有没有找到 mingw」：
+ *   找到  -> 前置进 PATH、RUSTUP_TOOLCHAIN 切到 windows-gnu、必要时覆盖 linker
+ *   没找到 -> 原样交给 cargo，用它默认的工具链（CI 上是 msvc）
+ *
+ * 另外会载入 .env.local，并把其中的相对路径私钥转成绝对路径。
  *
  * 用法：node scripts/run.mjs dev | build [-- 其它 tauri 参数]
  *
  * 环境变量：
- *   MIDITOOL_MINGW   mingw 的 bin 目录（CI 上指向 C:\msys64\ucrt64\bin）
+ *   MIDITOOL_MINGW   mingw 的 bin 目录（默认找 ~/.mingw64/mingw64/bin）
  *   MIDITOOL_CARGO   rustup 的 bin 目录（默认 ~/.cargo/bin）
- *
- * 设计要点：本地靠便携 mingw，CI 靠 MSYS2/PATH —— 两条路都能走，
- * 缺少某个目录时降级而不是直接退出，否则 GitHub Actions 上必然失败。
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -22,6 +26,8 @@ const projectRoot = path.resolve(import.meta.dirname, "..");
 const isWin = process.platform === "win32";
 const SEP = isWin ? ";" : ":";
 const EXE = isWin ? ".exe" : "";
+
+const GNU_TOOLCHAIN = "stable-x86_64-pc-windows-gnu";
 
 const TRIPLET_CC = [`x86_64-w64-mingw32-gcc${EXE}`];
 const ANY_CC = [...TRIPLET_CC, `gcc${EXE}`];
@@ -49,55 +55,56 @@ function resolveInPath(pathValue, names) {
   return null;
 }
 
-// ---- mingw：优先便携版目录，其次系统 PATH（CI / 自制环境）----
-const portableMingw = mingwCandidates.find((d) => hasAny(d, ANY_CC)) ?? null;
-const pathGcc = portableMingw ? null : resolveInPath(process.env.PATH, ANY_CC);
-
-if (!portableMingw && !pathGcc) {
-  console.error("找不到 mingw 的 gcc。");
-  console.error("  本地：npm run setup:mingw   （安装到 %USERPROFILE%\\.mingw64）");
-  console.error("  其它：设置 MIDITOOL_MINGW 指向 mingw 的 bin 目录，或把 gcc 放进 PATH");
-  console.error(`  已尝试：${mingwCandidates.join(", ") || "(无)"}`);
-  process.exit(1);
+// ---- mingw：可选。本机靠它绕开 MSVC，CI 上不存在也不需要 ----
+const mingwDir = mingwCandidates.find((d) => hasAny(d, ANY_CC)) ?? null;
+if (process.env.MIDITOOL_MINGW && !mingwDir) {
+  console.warn(`[run] MIDITOOL_MINGW 指向的目录里没有 gcc：${process.env.MIDITOOL_MINGW}`);
 }
 
-// ---- cargo：同上，rustup 默认在 ~/.cargo/bin，CI 上通常已在 PATH ----
-const hasPortableCargo = hasAny(cargoDir, [`cargo${EXE}`]);
-const pathCargo = hasPortableCargo ? null : resolveInPath(process.env.PATH, [`cargo${EXE}`]);
-
-if (!hasPortableCargo && !pathCargo) {
+// ---- cargo：rustup 默认 ~/.cargo/bin，CI 上通常已在 PATH ----
+const portableCargo = hasAny(cargoDir, [`cargo${EXE}`]) ? cargoDir : null;
+if (!portableCargo && !resolveInPath(process.env.PATH, [`cargo${EXE}`])) {
   console.error(`找不到 cargo（已尝试 ${cargoDir} 与 PATH）。`);
   console.error("请先安装 Rust：https://rustup.rs");
   process.exit(1);
 }
 
-const prepend = [];
-if (portableMingw) prepend.push(portableMingw);
-if (hasPortableCargo) prepend.push(cargoDir);
-
+const prepend = [mingwDir, portableCargo].filter(Boolean);
 const env = {
   ...process.env,
   PATH: [...prepend, process.env.PATH ?? ""].filter(Boolean).join(SEP),
 };
 
-// ---- .cargo/config.toml 写的是三元组名字（x86_64-w64-mingw32-gcc），
-//      系统 PATH 上只有裸 gcc 时用环境变量覆盖，cargo 认这两个变量名 ----
-const ENV_PREFIX = "CARGO_TARGET_X86_64_PC_WINDOWS_GNU";
-const tripletCc = resolveInPath(env.PATH, TRIPLET_CC);
-const crossCc = tripletCc ?? resolveInPath(env.PATH, ANY_CC);
-if (crossCc && !tripletCc) {
-  env[`${ENV_PREFIX}_LINKER`] = crossCc;
+if (mingwDir) {
+  // 便携 mingw 只在「没有 MSVC」的机器上装，出现即意味着要走 windows-gnu。
+  // 用 RUSTUP_TOOLCHAIN 指定，优先级高于 rust-toolchain.toml（仓库里已不放该文件）。
+  env.RUSTUP_TOOLCHAIN = GNU_TOOLCHAIN;
+
+  // .cargo/config.toml 写的是三元组名字；PATH 上只有裸 gcc/ar 时用环境变量覆盖，
+  // 这两个变量名是 cargo 的约定，优先级高于 config.toml。
+  const ENV_PREFIX = "CARGO_TARGET_X86_64_PC_WINDOWS_GNU";
+  const tripletCc = resolveInPath(env.PATH, TRIPLET_CC);
+  const anyCc = tripletCc ?? resolveInPath(env.PATH, ANY_CC);
+  if (anyCc && !tripletCc) env[`${ENV_PREFIX}_LINKER`] = anyCc;
+  if (!resolveInPath(env.PATH, TRIPLET_AR)) {
+    const anyAr = resolveInPath(env.PATH, ANY_AR);
+    if (anyAr) env[`${ENV_PREFIX}_AR`] = anyAr;
+  }
+
+  console.log(`[run] mingw ${mingwDir} → ${GNU_TOOLCHAIN}`);
+} else {
+  console.log("[run] 未找到便携 mingw，交给 cargo 默认工具链（CI / MSVC 模式）");
 }
 
-if (!resolveInPath(env.PATH, TRIPLET_AR)) {
-  const crossAr = resolveInPath(env.PATH, ANY_AR);
-  if (crossAr) env[`${ENV_PREFIX}_AR`] = crossAr;
+// ---- 签名私钥容错：.env.local 里常写成相对路径（.tauri\miditool.key），
+//      而 tauri 的签名步骤不保证以项目根为 cwd，这里统一转绝对路径。
+//      真密钥是单行 base64（约 350 字符），靠长度 + existsSync 双重判断避免误当路径。----
+function normalizeSigningKey() {
+  const value = env.TAURI_SIGNING_PRIVATE_KEY;
+  if (!value || value.length >= 260 || value.includes("\n")) return;
+  const asPath = path.isAbsolute(value) ? value : path.resolve(projectRoot, value);
+  if (fs.existsSync(asPath)) env.TAURI_SIGNING_PRIVATE_KEY = asPath;
 }
-
-const toolchainNote = portableMingw
-  ? `便携 mingw ${portableMingw}`
-  : `系统 mingw ${crossCc}`;
-console.log(`[run] ${toolchainNote}${isWin ? "" : " （非 Windows 平台，仅透传）"}`);
 
 // ---- .env.local（本地签名密钥等；CI 通过 Secrets 注入，文件不存在）----
 const envFile = path.join(projectRoot, ".env.local");
@@ -115,15 +122,7 @@ if (fs.existsSync(envFile)) {
     if (!(key in env)) env[key] = value;
   }
 }
-
-// ---- 签名私钥容错：.env.local 里常写成相对路径（.tauri\miditool.key），
-//      而 tauri 的签名步骤不保证以项目根为 cwd，这里统一转绝对路径。
-//      真密钥是单行 base64（约 350 字符），靠长度 + existsSync 双重判断避免误当路径。----
-const keyValue = env.TAURI_SIGNING_PRIVATE_KEY;
-if (keyValue && keyValue.length < 260 && !keyValue.includes("\n")) {
-  const asPath = path.isAbsolute(keyValue) ? keyValue : path.resolve(projectRoot, keyValue);
-  if (fs.existsSync(asPath)) env.TAURI_SIGNING_PRIVATE_KEY = asPath;
-}
+normalizeSigningKey();
 
 const args = process.argv.slice(2);
 const child = spawn("npx", ["tauri", ...args], {

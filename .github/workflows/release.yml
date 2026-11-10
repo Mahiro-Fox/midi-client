@@ -10,70 +10,33 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
+# 与 lan-room 的 workflow 保持一致：CI 不装 mingw，直接用 runner 自带的 MSVC。
+# windows-gnu + 便携 mingw 只是「本机没有 MSVC」时的替代方案，
+# scripts/run.mjs 检测不到 mingw 就会原样交给 cargo，用默认工具链编译。
 jobs:
   build:
     runs-on: windows-latest
     permissions:
       contents: write
 
-    env:
-      # 本机没有 MSVC，项目固定在 windows-gnu 工具链上；
-      # scripts/run.mjs 会把这个目录前置进 PATH 供 cargo 找链接器。
-      MIDITOOL_MINGW: 'C:\msys64\ucrt64\bin'
-      # 构建产物不弹任何交互框
-      CI: true
-
     steps:
       - uses: actions/checkout@v4
-
-      # 提供 x86_64-w64-mingw32-gcc / -ar（rust windows-gnu 目标的链接器）
-      - name: Setup MSYS2 mingw
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: false
-          install: mingw-w64-ucrt-x86_64-gcc
-          path-type: inherit
-
-      # 提前失败：工具链缺东西时不要等到 cargo link 阶段才报错
-      - name: Verify mingw linker
-        shell: pwsh
-        run: |
-          $bin = $env:MIDITOOL_MINGW
-          $cc = Join-Path $bin 'x86_64-w64-mingw32-gcc.exe'
-          if (-not (Test-Path $cc)) {
-            $cc = Join-Path $bin 'gcc.exe'
-            if (-not (Test-Path $cc)) { throw "缺少 gcc：$bin" }
-            Write-Host "注意：没有三元组前缀的 gcc，run.mjs 会用 CARGO_TARGET_*_LINKER 覆盖"
-          }
-          & $cc --version
-          $ar = Join-Path $bin 'x86_64-w64-mingw32-ar.exe'
-          if (Test-Path $ar) { & $ar --version | Select-Object -First 1 }
-          else { Write-Host "注意：没有三元组 ar，run.mjs 会退回 ar.exe" }
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable-x86_64-pc-windows-gnu
-          targets: x86_64-pc-windows-gnu
-
-      - name: Verify rust toolchain
-        shell: pwsh
-        run: |
-          rustc -vV
-          cargo -V
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
-      - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
 
-      # tag 与 tauri.conf.json 版本不一致会导致发布的 latest.json 指向错误版本
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # tag 与 tauri.conf.json 版本不一致会让 latest.json 指向错误的安装包
       - name: Check tag matches app version
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
@@ -94,8 +57,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: "MIDITOOL v__VERSION__"
-          releaseBody: |
-            自动构建发布。安装包与 `latest.json` 已附带签名，客户端可直接在线更新。
+          releaseBody: "下载下方的 `MIDITOOL_*_x64-setup.exe` 安装即可，已安装的旧版本会自动更新到该版本。"
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true

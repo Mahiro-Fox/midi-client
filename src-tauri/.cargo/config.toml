@@ -1,7 +1,8 @@
-# 本机无 MSVC / VS Build Tools，也没有管理员权限，
-# 因此固定使用 GNU 工具链 + 便携 mingw-w64 链接。
-# mingw 由 scripts/setup-mingw.mjs 安装到 %USERPROFILE%\.mingw64\mingw64\bin，
-# 通过 scripts/run.mjs 前置进 PATH。
+# 只在本机（无 MSVC / 无管理员权限）生效：run.mjs 发现便携 mingw 时会把
+# RUSTUP_TOOLCHAIN 切到 stable-x86_64-pc-windows-gnu，下面这段才会被用到。
+# CI 上不存在 mingw，run.mjs 不切工具链，cargo 走 runner 自带的 MSVC，
+# 本节对 x86_64-pc-windows-msvc 目标完全无效。
+# mingw 由 scripts/setup-mingw.mjs 安装到 %USERPROFILE%\.mingw64\mingw64\bin。
 [target.x86_64-pc-windows-gnu]
 linker = "x86_64-w64-mingw32-gcc"
 ar = "x86_64-w64-mingw32-ar"
