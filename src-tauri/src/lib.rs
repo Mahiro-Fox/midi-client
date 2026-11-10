@@ -31,5 +31,5 @@ pub fn run() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("启动 MIDITOOL 失败");
+        .expect("启动 midi-client 失败");
 }

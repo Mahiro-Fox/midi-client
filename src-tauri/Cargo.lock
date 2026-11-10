@@ -1964,6 +1964,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "midi-client"
+version = "0.0.1"
+dependencies = [
+ "log",
+ "midir",
+ "midly",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-process",
+ "tauri-plugin-updater",
+ "tokio",
+]
+
+[[package]]
 name = "midir"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1982,24 +2000,6 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "windows",
-]
-
-[[package]]
-name = "miditool"
-version = "1.0.2"
-dependencies = [
- "log",
- "midir",
- "midly",
- "reqwest",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-process",
- "tauri-plugin-updater",
- "tokio",
 ]
 
 [[package]]

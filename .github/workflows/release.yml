@@ -56,8 +56,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__
-          releaseName: "MIDITOOL v__VERSION__"
-          releaseBody: "下载下方的 `MIDITOOL_*_x64-setup.exe` 安装即可，已安装的旧版本会自动更新到该版本。"
+          releaseName: "midi-client v__VERSION__"
+          releaseBody: "下载下方的 `midi-client_*_x64-setup.exe` 安装即可，已安装的旧版本会自动更新到该版本。"
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true

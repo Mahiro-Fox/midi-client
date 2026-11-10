@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter};
 
 /// 远程曲库根地址，与原 Python 版本保持一致。
 pub const BASE_URL: &str = "https://mahirooyama.cn";
-const CLIENT_NAME: &str = "MIDITOOL";
+const CLIENT_NAME: &str = "midi-client";
 /// 进度事件节流间隔：跨进程 emit 每秒最多 10 次，避免打满 IPC。
 const EMIT_INTERVAL: Duration = Duration::from_millis(100);
 /// 停止标志轮询粒度，决定「停止」按钮的响应延迟。
@@ -350,7 +350,7 @@ fn run_playback(
             .get(port_index)
             .ok_or_else(|| "所选 MIDI 端口已不存在，请刷新后重试".to_string())?;
         let mut conn = out
-            .connect(port, "miditool-out")
+            .connect(port, "midi-client-out")
             .map_err(|e| format!("连接 MIDI 端口失败：{e}"))?;
 
         reset_channels(&mut conn);

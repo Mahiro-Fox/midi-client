@@ -1,4 +1,4 @@
-# MIDITOOL
+# midi-client
 
 MIDI 远程控制器。从远程曲库拉取 MIDI 文件，实时推送到本地 MIDI 输出端口（如 loopMIDI 虚拟端口），供 DAW / 软音源发声。
 
@@ -65,7 +65,7 @@ npm run app:build
 如果想用自己已有的 mingw，设置环境变量后即可（路径里有 `gcc` 就会自动切 gnu 工具链）：
 
 ```bash
-MIDITOOL_MINGW=D:\mingw64\bin npm run app:build
+MIDICLIENT_MINGW=D:\mingw64\bin npm run app:build
 ```
 
 ## 自动更新
@@ -74,7 +74,7 @@ MIDITOOL_MINGW=D:\mingw64\bin npm run app:build
 
 | 用途 | 位置 |
 |---|---|
-| 私钥（勿外泄） | `C:\Users\fjkj\.tauri\miditool.key` |
+| 私钥（勿外泄） | `C:\Users\fjkj\.tauri\midi-client.key` |
 | 公钥 | 已写入 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey` |
 | 本地构建用环境变量 | `.env.local`（已 gitignore） |
 
@@ -83,7 +83,7 @@ MIDITOOL_MINGW=D:\mingw64\bin npm run app:build
 ### 上传到 GitHub 前：配置 Secrets
 
 ```powershell
-gh secret set TAURI_SIGNING_PRIVATE_KEY --body (Get-Content $env:USERPROFILE\.tauri\miditool.key -Raw)
+gh secret set TAURI_SIGNING_PRIVATE_KEY --body (Get-Content $env:USERPROFILE\.tauri\midi-client.key -Raw)
 gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --body "<.env.local 里的密码>"
 ```
 

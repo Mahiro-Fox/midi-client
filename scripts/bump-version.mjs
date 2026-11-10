@@ -10,7 +10,7 @@
 //   package-lock.json                根 version + packages[""].version
 //   src-tauri/tauri.conf.json         version        <- 安装包 / latest.json / 更新器的唯一真相源
 //   src-tauri/Cargo.toml              [package] version
-//   src-tauri/Cargo.lock              name = "miditool" 那一条
+//   src-tauri/Cargo.lock              name = "midi-client" 那一条
 // 第三方依赖的版本一律不碰（byteorder-lite / vswhom 之类也是 0.1.x，改了会让项目编译不了）。
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -43,9 +43,9 @@ function save(file, text) {
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const JSON_ROOT_VER = /(^  "version": ")[^"]*(")/m; // 只匹配顶层键，不动嵌套
 const CARGO_TOML_VER = /(^\[package\][\s\S]*?^version\s*=\s*")[^"]*(")/m;
-const CARGO_LOCK_VER = /(\[\[package\]\]\nname = "miditool"\nversion = ")[^"]*(")/;
-const NPM_ROOT_VER = /(\{\n  "name": "miditool",\n  "version": ")[^"]*(")/;
-const NPM_PKG0_VER = /(\n    "": \{\n      "name": "miditool",\n      "version": ")[^"]*(")/;
+const CARGO_LOCK_VER = /(\[\[package\]\]\nname = "midi-client"\nversion = ")[^"]*(")/;
+const NPM_ROOT_VER = /(\{\n  "name": "midi-client",\n  "version": ")[^"]*(")/;
+const NPM_PKG0_VER = /(\n    "": \{\n      "name": "midi-client",\n      "version": ")[^"]*(")/;
 
 // ---- 当前版本 + 一致性预检 ----
 const files = Object.fromEntries(Object.entries(P).map(([k, v]) => [k, load(v)]));
@@ -134,7 +134,7 @@ apply("src-tauri/Cargo.toml", files.cargoToml, files.cargoToml.text.replace(CARG
 
 // ---- src-tauri/Cargo.lock ----
 if (!CARGO_LOCK_VER.test(files.cargoLock.text)) {
-  console.error('Cargo.lock 中没找到 name = "miditool" 的版本条目');
+  console.error('Cargo.lock 中没找到 name = "midi-client" 的版本条目');
   process.exit(1);
 }
 apply("src-tauri/Cargo.lock", files.cargoLock, files.cargoLock.text.replace(CARGO_LOCK_VER, `$1${next}$2`));
@@ -160,15 +160,15 @@ if (!dryRun) {
       () => {
         const t = load(P.pkgLock).text;
         return (
-          t.startsWith(`{\n  "name": "miditool",\n  "version": "${next}"`) &&
-          t.includes(`\n    "": {\n      "name": "miditool",\n      "version": "${next}"`)
+          t.startsWith(`{\n  "name": "midi-client",\n  "version": "${next}"`) &&
+          t.includes(`\n    "": {\n      "name": "midi-client",\n      "version": "${next}"`)
         );
       },
     ],
     [
       "src-tauri/Cargo.lock",
       () =>
-        new RegExp(`\\[\\[package\\]\\]\\nname = "miditool"\\nversion = "${next.replace(/\./g, "\\.")}"`).test(
+        new RegExp(`\\[\\[package\\]\\]\\nname = "midi-client"\\nversion = "${next.replace(/\./g, "\\.")}"`).test(
           load(P.cargoLock).text,
         ),
     ],

@@ -14,8 +14,8 @@
  * 用法：node scripts/run.mjs dev | build [-- 其它 tauri 参数]
  *
  * 环境变量：
- *   MIDITOOL_MINGW   mingw 的 bin 目录（默认找 ~/.mingw64/mingw64/bin）
- *   MIDITOOL_CARGO   rustup 的 bin 目录（默认 ~/.cargo/bin）
+ *   MIDICLIENT_MINGW   mingw 的 bin 目录（默认找 ~/.mingw64/mingw64/bin）
+ *   MIDICLIENT_CARGO   rustup 的 bin 目录（默认 ~/.cargo/bin）
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -35,11 +35,11 @@ const TRIPLET_AR = [`x86_64-w64-mingw32-ar${EXE}`];
 const ANY_AR = [...TRIPLET_AR, `ar${EXE}`];
 
 const mingwCandidates = [
-  process.env.MIDITOOL_MINGW,
+  process.env.MIDICLIENT_MINGW,
   path.join(os.homedir(), ".mingw64", "mingw64", "bin"),
 ].filter(Boolean);
 
-const cargoDir = process.env.MIDITOOL_CARGO ?? path.join(os.homedir(), ".cargo", "bin");
+const cargoDir = process.env.MIDICLIENT_CARGO ?? path.join(os.homedir(), ".cargo", "bin");
 
 const hasAny = (dir, names) => names.some((n) => fs.existsSync(path.join(dir, n)));
 
@@ -57,8 +57,8 @@ function resolveInPath(pathValue, names) {
 
 // ---- mingw：可选。本机靠它绕开 MSVC，CI 上不存在也不需要 ----
 const mingwDir = mingwCandidates.find((d) => hasAny(d, ANY_CC)) ?? null;
-if (process.env.MIDITOOL_MINGW && !mingwDir) {
-  console.warn(`[run] MIDITOOL_MINGW 指向的目录里没有 gcc：${process.env.MIDITOOL_MINGW}`);
+if (process.env.MIDICLIENT_MINGW && !mingwDir) {
+  console.warn(`[run] MIDICLIENT_MINGW 指向的目录里没有 gcc：${process.env.MIDICLIENT_MINGW}`);
 }
 
 // ---- cargo：rustup 默认 ~/.cargo/bin，CI 上通常已在 PATH ----
@@ -96,7 +96,7 @@ if (mingwDir) {
   console.log("[run] 未找到便携 mingw，交给 cargo 默认工具链（CI / MSVC 模式）");
 }
 
-// ---- 签名私钥容错：.env.local 里常写成相对路径（.tauri\miditool.key），
+// ---- 签名私钥容错：.env.local 里常写成相对路径（.tauri\midi-client.key），
 //      而 tauri 的签名步骤不保证以项目根为 cwd，这里统一转绝对路径。
 //      真密钥是单行 base64（约 350 字符），靠长度 + existsSync 双重判断避免误当路径。----
 function normalizeSigningKey() {

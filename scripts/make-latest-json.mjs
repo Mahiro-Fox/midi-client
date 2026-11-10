@@ -7,7 +7,7 @@ const root = process.cwd();
 const conf = JSON.parse(readFileSync(join(root, "src-tauri/tauri.conf.json"), "utf8"));
 const version = conf.version;
 const tag = process.argv[2] || `v${version}`;
-const repo = "Mahiro-Fox/MIDITOOL";
+const repo = "Mahiro-Fox/midi-client";
 const dir = join(root, "src-tauri/target/release/bundle/nsis");
 
 if (!existsSync(dir)) {
@@ -21,7 +21,7 @@ if (setups.length === 0) {
   console.error("没有找到 NSIS 安装包");
   process.exit(1);
 }
-const exact = `MIDITOOL_${version}_x64-setup.exe`;
+const exact = `midi-client_${version}_x64-setup.exe`;
 const setup = setups.includes(exact)
   ? exact
   : setups
@@ -38,7 +38,7 @@ if (!existsSync(sigPath)) {
 
 const latest = {
   version,
-  notes: `MIDITOOL v${version}`,
+  notes: `midi-client v${version}`,
   pub_date: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
   platforms: {
     "windows-x86_64": {

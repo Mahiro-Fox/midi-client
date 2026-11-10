@@ -38,7 +38,7 @@ export default function Header({
     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4">
       <Logo className="size-7" />
       <div className="flex items-baseline gap-2">
-        <span className="text-[15px] font-medium tracking-wide text-foreground">MIDITOOL</span>
+        <span className="text-[15px] font-medium tracking-wide text-foreground">midi-client</span>
         {version && (
           <Badge
             variant="secondary"

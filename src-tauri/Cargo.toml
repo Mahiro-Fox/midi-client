@@ -1,13 +1,13 @@
 [package]
-name = "miditool"
-version = "1.0.2"
+name = "midi-client"
+version = "0.0.1"
 description = "MIDI 远程控制器"
 authors = ["Mahiro-Fox"]
 edition = "2021"
 rust-version = "1.77"
 
 [lib]
-name = "miditool_lib"
+name = "midi_client_lib"
 crate-type = ["lib"]
 
 [build-dependencies]
