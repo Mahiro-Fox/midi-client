@@ -1,0 +1,7 @@
+# 本机无 MSVC / VS Build Tools，也没有管理员权限，
+# 因此固定使用 GNU 工具链 + 便携 mingw-w64 链接。
+# mingw 由 scripts/setup-mingw.mjs 安装到 %USERPROFILE%\.mingw64\mingw64\bin，
+# 通过 scripts/run.mjs 前置进 PATH。
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+ar = "x86_64-w64-mingw32-ar"

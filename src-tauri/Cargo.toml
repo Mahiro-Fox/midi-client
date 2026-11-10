@@ -1,0 +1,39 @@
+[package]
+name = "miditool"
+version = "0.1.0"
+description = "MIDI 远程控制器"
+authors = ["Mahiro-Fox"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "miditool_lib"
+crate-type = ["lib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+midir = "0.11"
+midly = { version = "0.5", default-features = false, features = ["std", "alloc"] }
+# 用 Windows 自带 SChannel，避免 rustls 引入 ring / aws-lc-rs 所需的 CMake 与 C 构建链
+reqwest = { version = "0.13", default-features = false, features = [
+  "native-tls",
+  "json",
+  "charset",
+] }
+tokio = { version = "1", features = ["time"] }
+log = "0.4"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-950: #08080d;
+  --color-ink-900: #0e0e16;
+  --color-ink-850: #13131d;
+  --color-ink-800: #191926;
+  --color-ink-700: #242435;
+  --color-ink-600: #33334a;
+  --color-brand-300: #b9aeff;
+  --color-brand-400: #9b8cff;
+  --color-brand-500: #7c6cf5;
+  --color-brand-600: #6554e0;
+  --font-sans: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui,
+    -apple-system, "Segoe UI", sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ink-950);
+  color: #e9e9f2;
+  font-family: var(--font-sans);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-brand-500) 45%, transparent);
+}
+
+/* 细滚动条，和暗色面板融为一体 */
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-ink-600);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-brand-600);
+  background-clip: content-box;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-rise {
+  animation: rise 0.18s ease-out both;
+}
+
+@keyframes pulse-bar {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
