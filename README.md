@@ -10,10 +10,25 @@ MIDI 远程控制器。从远程曲库拉取 MIDI 文件，实时推送到本地
 |---|---|
 | 外壳 | Tauri 2 |
 | 前端 | React 19 + TypeScript + Tailwind CSS 4 + Vite |
+| UI 组件 | shadcn/ui（new-york 风格，`src/components/ui`） |
+| 图标 | lucide-react |
+| 长列表 | `@tanstack/react-virtual`（虚拟滚动，只渲染可视区） |
+| 提示 / 弹窗 | sonner + Radix Dialog |
 | MIDI 解析 | `midly` |
 | MIDI 输出 | `midir`（Windows 走 WinMM，与 mido/python-rtmidi 同源） |
 | 网络 | `reqwest`（Windows SChannel，无需 OpenSSL） |
 | 更新 | `tauri-plugin-updater`（minisign 签名） |
+
+## 界面结构
+
+- **主题**：`src/index.css` 里保留 `ink-*` / `brand-*` 调色板，同时把 shadcn 的语义变量
+  （`--background` / `--primary` / `--border` …）直接赋成暗色值。应用只有暗色，`<html class="dark">`
+  保证 shadcn 组件里的 `dark:` 分支生效，视觉与改造前一致。
+- **虚拟列表**：曲库 139 首以上，列表用固定行高 44px 虚拟化，只渲染可视区 + 12 行 overscan。
+  「定位当前曲目」不是 `scrollIntoView`，而是 `virtualizer.scrollToIndex(index, { align: "center" })`，
+  这样目标行还没挂载也能滚到位，随后叠一层 1.25s 光圈提示。
+- **播放只认图标**：列表行是不可点的容器，只有右侧播放按钮触发播放，避免误触整行。
+- **新增组件**：`npx shadcn@latest add <name>` 即可，别名 `@/components/ui`；`cn()` 在 `src/lib/utils.ts`。
 
 ## 为什么本地用 GNU 工具链
 

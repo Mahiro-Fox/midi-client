@@ -1,5 +1,17 @@
-import type { PortInfo } from "../lib/api";
-import { IconRefresh, IconSparkle, Logo } from "./icons";
+import { RefreshCw, Sparkles } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { PortInfo } from "@/lib/api";
+import { Logo } from "./logo";
 
 type Props = {
   ports: PortInfo[];
@@ -20,58 +32,76 @@ export default function Header({
   onRefreshPorts,
   onCheckUpdate,
 }: Props) {
+  const hasPorts = ports.length > 0;
+
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-ink-800 bg-ink-900 px-4">
-      <Logo className="h-7 w-7" />
+    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4">
+      <Logo className="size-7" />
       <div className="flex items-baseline gap-2">
-        <span className="text-[15px] font-medium tracking-wide text-zinc-100">MIDITOOL</span>
+        <span className="text-[15px] font-medium tracking-wide text-foreground">MIDITOOL</span>
         {version && (
-          <span className="rounded bg-ink-800 px-1.5 py-0.5 text-[10px] leading-none text-zinc-500">
+          <Badge
+            variant="secondary"
+            className="h-4 rounded px-1.5 text-[10px] font-normal text-muted-foreground"
+          >
             v{version}
-          </span>
+          </Badge>
         )}
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        <span
-          className={`h-1.5 w-1.5 rounded-full ${
-            ports.length > 0 ? "bg-emerald-400" : "bg-amber-400"
-          }`}
-          title={ports.length > 0 ? "已检测到 MIDI 端口" : "未检测到 MIDI 端口"}
-        />
-        <label className="text-[12px] text-zinc-500" htmlFor="port">
-          输出端口
-        </label>
-        <select
-          id="port"
-          value={portIndex ?? ""}
-          onChange={(event) => onPortChange(Number(event.target.value))}
-          className="h-8 max-w-[240px] min-w-[150px] rounded-lg border border-ink-700 bg-ink-800 px-2.5 text-[13px] text-zinc-200 outline-none transition-colors hover:border-ink-600 focus:border-brand-500"
-        >
-          {ports.length === 0 && <option value="">未找到端口</option>}
-          {ports.map((port) => (
-            <option key={port.index} value={port.index}>
-              {port.name}
-            </option>
-          ))}
-        </select>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              className={`size-1.5 rounded-full ${hasPorts ? "bg-emerald-400" : "bg-amber-400"}`}
+            />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {hasPorts ? `已检测到 ${ports.length} 个 MIDI 端口` : "未检测到 MIDI 端口"}
+          </TooltipContent>
+        </Tooltip>
 
-        <button
-          onClick={onRefreshPorts}
-          title="刷新端口"
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-ink-700 text-zinc-400 transition-colors hover:border-ink-600 hover:text-zinc-100 active:scale-95"
-        >
-          <IconRefresh className="h-3.5 w-3.5" />
-        </button>
+        <span className="text-xs text-muted-foreground">输出端口</span>
 
-        <button
-          onClick={onCheckUpdate}
-          disabled={checking}
-          className="flex h-8 items-center gap-1.5 rounded-lg border border-ink-700 px-3 text-[12px] text-zinc-300 transition-colors hover:border-brand-600 hover:text-brand-300 disabled:opacity-50 active:scale-95"
+        <Select
+          value={portIndex !== null ? String(portIndex) : undefined}
+          onValueChange={(value) => onPortChange(Number(value))}
+          disabled={!hasPorts}
         >
-          <IconSparkle className={`h-3.5 w-3.5 ${checking ? "animate-pulse" : ""}`} />
+          <SelectTrigger size="sm" className="w-55 text-xs">
+            <SelectValue placeholder="未找到端口" />
+          </SelectTrigger>
+          <SelectContent
+            position="popper"
+            sideOffset={6}
+            className="min-w-(--radix-select-trigger-width)"
+          >
+            {ports.map((port) => (
+              <SelectItem key={port.index} value={String(port.index)} className="text-xs">
+                {port.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              onClick={onRefreshPorts}
+              aria-label="刷新端口"
+            >
+              <RefreshCw />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">刷新端口列表</TooltipContent>
+        </Tooltip>
+
+        <Button variant="outline" size="sm" onClick={onCheckUpdate} disabled={checking}>
+          <Sparkles className={checking ? "animate-pulse" : undefined} />
           {checking ? "检查中" : "检查更新"}
-        </button>
+        </Button>
       </div>
     </header>
   );

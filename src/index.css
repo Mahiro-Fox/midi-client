@@ -1,5 +1,10 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
+/* shadcn 组件里的 dark: 前缀按 class 生效（应用固定暗色，见 index.html 的 class="dark"） */
+@custom-variant dark (&:is(.dark *));
+
+/* ── 品牌调色板：沿用重写前的视觉 ─────────────────────────── */
 @theme {
   --color-ink-950: #08080d;
   --color-ink-900: #0e0e16;
@@ -15,61 +20,109 @@
     -apple-system, "Segoe UI", sans-serif;
 }
 
-html,
-body,
-#root {
-  height: 100%;
+/* ── shadcn 语义色：应用只有暗色主题，直接给暗色的值 ───────── */
+:root {
+  --radius: 0.625rem;
+
+  --background: #08080d;
+  --foreground: #e9e9f2;
+  --card: #0e0e16;
+  --card-foreground: #e9e9f2;
+  --popover: #1d1d2c;
+  --popover-foreground: #f0f0f8;
+  --primary: #7c6cf5;
+  --primary-foreground: #0a0a14;
+  --secondary: #1a1a27;
+  --secondary-foreground: #e9e9f2;
+  --muted: #1a1a27;
+  --muted-foreground: #8c8ca6;
+  --accent: #26263a;
+  --accent-foreground: #efeff7;
+  --destructive: #e5484d;
+  --border: #242435;
+  --input: #2b2b3e;
+  --ring: #7c6cf5;
 }
 
-body {
-  margin: 0;
-  background: var(--color-ink-950);
-  color: #e9e9f2;
-  font-family: var(--font-sans);
-  overflow: hidden;
-  -webkit-font-smoothing: antialiased;
-  user-select: none;
-  cursor: default;
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
-::selection {
-  background: color-mix(in oklab, var(--color-brand-500) 45%, transparent);
-}
-
-/* 细滚动条，和暗色面板融为一体 */
-*::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
-}
-*::-webkit-scrollbar-track {
-  background: transparent;
-}
-*::-webkit-scrollbar-thumb {
-  background: var(--color-ink-600);
-  border-radius: 999px;
-  border: 2px solid transparent;
-  background-clip: content-box;
-}
-*::-webkit-scrollbar-thumb:hover {
-  background: var(--color-brand-600);
-  background-clip: content-box;
-}
-
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
+@layer base {
+  * {
+    border-color: var(--border);
   }
-  to {
-    opacity: 1;
-    transform: none;
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    /* 桌面应用手感：默认不可选中，但输入框里要能选中文字 */
+    user-select: none;
+    cursor: default;
+  }
+
+  input,
+  textarea {
+    user-select: text;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 45%, transparent);
+  }
+
+  /* 细滚动条，和暗色面板融为一体 */
+  *::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--color-ink-600);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--color-brand-600);
+    background-clip: content-box;
   }
 }
 
-.animate-rise {
-  animation: rise 0.18s ease-out both;
-}
-
+/* 播放中的跳动音柱 */
 @keyframes pulse-bar {
   0%,
   100% {
@@ -78,4 +131,23 @@ body {
   50% {
     transform: scaleY(1);
   }
+}
+
+/* 定位到当前曲目时的提示光圈：用 box-shadow，不引起布局抖动 */
+@keyframes locate-flash {
+  0%,
+  55% {
+    box-shadow:
+      0 0 0 1.5px var(--color-brand-400),
+      0 0 22px -4px color-mix(in oklab, var(--color-brand-500) 70%, transparent);
+  }
+  100% {
+    box-shadow:
+      0 0 0 1.5px transparent,
+      0 0 22px -4px transparent;
+  }
+}
+
+.locate-flash {
+  animation: locate-flash 1.25s ease-out;
 }
