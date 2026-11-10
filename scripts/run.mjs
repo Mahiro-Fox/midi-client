@@ -116,6 +116,15 @@ if (fs.existsSync(envFile)) {
   }
 }
 
+// ---- 签名私钥容错：.env.local 里常写成相对路径（.tauri\miditool.key），
+//      而 tauri 的签名步骤不保证以项目根为 cwd，这里统一转绝对路径。
+//      真密钥是单行 base64（约 350 字符），靠长度 + existsSync 双重判断避免误当路径。----
+const keyValue = env.TAURI_SIGNING_PRIVATE_KEY;
+if (keyValue && keyValue.length < 260 && !keyValue.includes("\n")) {
+  const asPath = path.isAbsolute(keyValue) ? keyValue : path.resolve(projectRoot, keyValue);
+  if (fs.existsSync(asPath)) env.TAURI_SIGNING_PRIVATE_KEY = asPath;
+}
+
 const args = process.argv.slice(2);
 const child = spawn("npx", ["tauri", ...args], {
   cwd: projectRoot,
