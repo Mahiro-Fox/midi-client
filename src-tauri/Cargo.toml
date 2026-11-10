@@ -1,6 +1,6 @@
 [package]
 name = "miditool"
-version = "0.1.0"
+version = "1.0.1"
 description = "MIDI 远程控制器"
 authors = ["Mahiro-Fox"]
 edition = "2021"
