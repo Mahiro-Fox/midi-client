@@ -16,10 +16,17 @@ jobs:
     permissions:
       contents: write
 
+    env:
+      # 本机没有 MSVC，项目固定在 windows-gnu 工具链上；
+      # scripts/run.mjs 会把这个目录前置进 PATH 供 cargo 找链接器。
+      MIDITOOL_MINGW: 'C:\msys64\ucrt64\bin'
+      # 构建产物不弹任何交互框
+      CI: true
+
     steps:
       - uses: actions/checkout@v4
 
-      # 项目固定使用 windows-gnu 工具链，需要 mingw 提供链接器
+      # 提供 x86_64-w64-mingw32-gcc / -ar（rust windows-gnu 目标的链接器）
       - name: Setup MSYS2 mingw
         uses: msys2/setup-msys2@v2
         with:
@@ -28,14 +35,32 @@ jobs:
           install: mingw-w64-ucrt-x86_64-gcc
           path-type: inherit
 
-      - name: Put mingw on PATH
+      # 提前失败：工具链缺东西时不要等到 cargo link 阶段才报错
+      - name: Verify mingw linker
         shell: pwsh
-        run: echo "C:\msys64\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+        run: |
+          $bin = $env:MIDITOOL_MINGW
+          $cc = Join-Path $bin 'x86_64-w64-mingw32-gcc.exe'
+          if (-not (Test-Path $cc)) {
+            $cc = Join-Path $bin 'gcc.exe'
+            if (-not (Test-Path $cc)) { throw "缺少 gcc：$bin" }
+            Write-Host "注意：没有三元组前缀的 gcc，run.mjs 会用 CARGO_TARGET_*_LINKER 覆盖"
+          }
+          & $cc --version
+          $ar = Join-Path $bin 'x86_64-w64-mingw32-ar.exe'
+          if (Test-Path $ar) { & $ar --version | Select-Object -First 1 }
+          else { Write-Host "注意：没有三元组 ar，run.mjs 会退回 ar.exe" }
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable-x86_64-pc-windows-gnu
           targets: x86_64-pc-windows-gnu
+
+      - name: Verify rust toolchain
+        shell: pwsh
+        run: |
+          rustc -vV
+          cargo -V
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -47,6 +72,18 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # tag 与 tauri.conf.json 版本不一致会导致发布的 latest.json 指向错误版本
+      - name: Check tag matches app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $tag = $env:GITHUB_REF_NAME.TrimStart('v')
+          if ($tag -ne $conf.version) {
+            throw "tag v$tag 与 tauri.conf.json 的 $($conf.version) 不一致，先跑 npm run bump <version>"
+          }
+          Write-Host "版本一致：$($conf.version)"
 
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0

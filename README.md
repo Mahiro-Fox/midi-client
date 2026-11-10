@@ -88,6 +88,15 @@ git push origin main --tags
 `release.yml` 会用 gnu 工具链构建，自动上传安装包、`.exe.sig` 和 `latest.json`。
 客户端「检查更新」读取的正是 `releases/latest/download/latest.json`。
 
+CI 上没有便携 mingw（那是本地用来绕开 MSVC 的），改由 MSYS2 的 UCRT64 工具链提供链接器，
+workflow 里用 `MIDITOOL_MINGW: C:\msys64\ucrt64\bin` 告诉 `scripts/run.mjs` 去哪找 gcc。
+`run.mjs` 的判断顺序是「`MIDITOOL_MINGW` → `~/.mingw64` → 系统 PATH」，三者都找不到才报错，
+所以同一份脚本在本地和 Actions 上都能跑；PATH 上只有裸 `gcc`/`ar` 时会用
+`CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER` 覆盖 `.cargo/config.toml` 里的三元组名字。
+
+workflow 会在编译前先校验 mingw、rustc 和 tag 与 `tauri.conf.json` 版本是否一致——
+版本对不上时 `latest.json` 会指向错误的安装包，所以在第一步就 fail 掉。
+
 如果想在本地手动传 Release，打完包后执行 `npm run release:latest`，
 它会在 `src-tauri/target/release/bundle/nsis/` 下生成 `latest.json`，
 把安装包、`.sig` 和它一起上传即可。
