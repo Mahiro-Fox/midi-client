@@ -1,23 +1,34 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode, type UIEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Loader2, Play } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { prettyName } from "@/lib/format";
+import { formatTime } from "@/lib/format";
+import type { TrackItem } from "@/lib/tracks";
 
 type Props = {
-  files: string[];
-  playingTitle: string | null;
+  items: TrackItem[];
+  /** 当前播放条目的 key */
+  activeKey: string | null;
   playing: boolean;
-  busy: string | null;
+  /** 正在加载的条目 key */
+  busyKey: string | null;
   /** 每次 +1 表示「滚到当前播放曲目」，0 表示还没触发过 */
   locateTick: number;
-  onPlay: (fileName: string) => void;
+  onPlay: (item: TrackItem) => void;
+  /** 滚动接近底部时触发，用于分页拉取 */
+  onReachEnd?: () => void;
+  /** 列表底部的状态行（加载更多 / 已全部加载） */
+  footer?: ReactNode;
+  loading?: boolean;
+  emptyText?: string;
 };
 
 /** 行高固定，虚拟列表才能精确算总高度与滚动位置 */
 const ROW_HEIGHT = 44;
 const ROW_INNER = 40;
+/** 距底部多少像素开始预取下一页 */
+const REACH_END_OFFSET = 420;
 
 function Equalizer() {
   return (
@@ -37,78 +48,91 @@ function Equalizer() {
 }
 
 export default function FileList({
-  files,
-  playingTitle,
+  items,
+  activeKey,
   playing,
-  busy,
+  busyKey,
   locateTick,
   onPlay,
+  onReachEnd,
+  footer,
+  loading = false,
+  emptyText = "没有匹配的曲目",
 }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [flash, setFlash] = useState(false);
 
   const virtualizer = useVirtualizer({
-    count: files.length,
+    count: items.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 12,
   });
 
-  // 当前播放曲目在（可能被过滤过的）列表里的位置
-  const activeIndex = useMemo(
-    () =>
-      playingTitle
-        ? files.findIndex((file) => prettyName(file) === playingTitle)
-        : -1,
-    [files, playingTitle],
-  );
-
-  // 只让「点击定位」触发滚动：effect 不依赖 activeIndex，
-  // 否则用户手动切歌时列表会被动跳到中间。
-  const activeIndexRef = useRef(activeIndex);
-  activeIndexRef.current = activeIndex;
+  // 定位：只处理「还没成功过」的那次请求。
+  // 目标行可能因为搜索过滤或分页还没进列表，此时不记为已处理，
+  // 等 items 变化后这个 effect 会再跑一次。
+  const lastLocated = useRef(0);
 
   useEffect(() => {
-    if (locateTick === 0) return;
-    const index = activeIndexRef.current;
+    if (locateTick === 0 || locateTick === lastLocated.current) return;
+    const index = activeKey
+      ? items.findIndex((item) => item.key === activeKey)
+      : -1;
     if (index < 0) return;
 
+    lastLocated.current = locateTick;
     // 虚拟列表里目标行可能还没挂载，不能靠 scrollIntoView
     virtualizer.scrollToIndex(index, { align: "center", behavior: "smooth" });
     setFlash(true);
+  }, [locateTick, items, activeKey, virtualizer]);
+
+  useEffect(() => {
+    if (!flash) return;
     const timer = setTimeout(() => setFlash(false), 1300);
     return () => clearTimeout(timer);
-  }, [locateTick, virtualizer]);
+  }, [flash]);
 
-  if (files.length === 0) {
+  const handleScroll = (event: UIEvent<HTMLDivElement>) => {
+    if (!onReachEnd) return;
+    const el = event.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < REACH_END_OFFSET) {
+      onReachEnd();
+    }
+  };
+
+  if (items.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center text-[13px] text-muted-foreground">
-        没有匹配的曲目
+        {loading ? "加载中…" : emptyText}
       </div>
     );
   }
 
-  const items = virtualizer.getVirtualItems();
+  const virtualItems = virtualizer.getVirtualItems();
 
   return (
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
+    <div
+      ref={scrollRef}
+      onScroll={handleScroll}
+      className="min-h-0 flex-1 overflow-y-auto px-3 pb-2"
+    >
       <div
         className="relative w-full"
         style={{ height: `${virtualizer.getTotalSize()}px` }}
       >
-        {items.map((item) => {
-          const file = files[item.index];
-          const name = prettyName(file);
-          const active = item.index === activeIndex;
-          const loading = busy === file || busy === name;
+        {virtualItems.map((virtualItem) => {
+          const item = items[virtualItem.index];
+          const active = item.key === activeKey;
+          const busy = busyKey === item.key;
 
           return (
             <div
-              key={item.key}
+              key={virtualItem.key}
               className="absolute top-0 left-0 w-full py-0.5"
               style={{
-                height: `${item.size}px`,
-                transform: `translateY(${item.start}px)`,
+                height: `${virtualItem.size}px`,
+                transform: `translateY(${virtualItem.start}px)`,
               }}
             >
               <div
@@ -124,34 +148,46 @@ export default function FileList({
                     active ? "text-primary" : "text-muted-foreground/70"
                   }`}
                 >
-                  {String(item.index + 1).padStart(2, "0")}
+                  {String(virtualItem.index + 1).padStart(2, "0")}
                 </span>
 
                 <span
-                  className={`flex-1 truncate text-[13.5px] ${
+                  className={`min-w-0 flex-1 truncate text-[13.5px] ${
                     active
                       ? "text-brand-300"
                       : "text-zinc-300 group-hover:text-foreground"
                   }`}
                 >
-                  {name}
+                  {item.title}
                 </span>
+
+                {item.sub && (
+                  <span className="hidden max-w-[130px] shrink-0 truncate text-[11px] text-muted-foreground/60 sm:inline">
+                    {item.sub}
+                  </span>
+                )}
+
+                {item.sec != null && (
+                  <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground/60">
+                    {formatTime(item.sec)}
+                  </span>
+                )}
 
                 {/* 播放只由这个按钮触发，行本身不可点 */}
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => onPlay(file)}
-                  disabled={loading}
-                  title={`播放 ${name}`}
-                  aria-label={`播放 ${name}`}
+                  onClick={() => onPlay(item)}
+                  disabled={busy}
+                  title={`播放 ${item.title}`}
+                  aria-label={`播放 ${item.title}`}
                   className={`shrink-0 rounded-full hover:bg-primary/15 hover:text-brand-300 ${
                     active
                       ? "text-primary"
                       : "text-muted-foreground group-hover:text-brand-300"
                   }`}
                 >
-                  {loading ? (
+                  {busy ? (
                     <Loader2 className="animate-spin" />
                   ) : active && playing ? (
                     <Equalizer />
@@ -164,6 +200,8 @@ export default function FileList({
           );
         })}
       </div>
+
+      {footer}
     </div>
   );
 }

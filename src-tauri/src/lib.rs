@@ -15,7 +15,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_ports,
             commands::list_remote_files,
+            commands::list_celestia_songs,
             commands::play_remote,
+            commands::play_celestia,
             commands::play_local,
             commands::stop_playback,
             commands::playback_state,

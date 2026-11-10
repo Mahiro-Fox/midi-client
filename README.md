@@ -1,8 +1,34 @@
 # midi-client
 
-MIDI 远程控制器。从远程曲库拉取 MIDI 文件，实时推送到本地 MIDI 输出端口（如 loopMIDI 虚拟端口），供 DAW / 软音源发声。
+MIDI 远程控制器。从远程曲库拉取 MIDI 曲谱，实时推送到本地 MIDI 输出端口（如 loopMIDI 虚拟端口），供 DAW / 软音源发声。
 
 这是原 Python（tkinter + mido）版本的完整重写：界面换成 React + Tailwind，播放引擎换成 Rust，并加入自动更新。
+
+## 曲库来源
+
+界面顶部用标签栏切换，两个源的数据模型不同，但都归一到同一个 `TrackItem`（`src/lib/tracks.ts`），
+分页参数也由 `src/lib/library.ts` 抹平，共用一套虚拟列表 + 滚动加载。
+
+| 源 | 接口 | 特点 |
+|---|---|---|
+| 原曲库 | `mahirooyama.cn/api/midi?search=&page=&limit=` | 分页（40/页，共 139 首），服务端搜索，按修改时间倒序 |
+| 星穹音乐厅 | `celestia.chiooone.com/concert/api/songs?q=&sort=&offset=&limit=` | 分页（40/页，共 259 首），服务端搜索与排序，带时长 / 上传者 |
+
+两个源的参数语义不同（原曲库传页码，星穹传条目偏移），`loadTrackPage` 统一按「第几页」调用。
+原曲库接口若还没升级、响应里没有 `pagination` 字段，Rust 侧会就地完成过滤与切片，前端拿到的结构始终一致。
+
+星穹音乐厅的曲谱是自定义 **DPS1** 文本格式，不是标准 MIDI 文件：
+
+```
+DPS1\t<id>\t<title>\t<事件数>
+<逐事件毫秒增量，逗号分隔>
+<逐事件打包值 类型<<16 | 数据1<<8 | 数据2>
+```
+
+类型 1 = NoteOn（数据1 音高，数据2 力度）、2 = NoteOff、3 = 控制器（如 64 = 延音踏板）。
+`midi.rs` 的 `build_timeline` 按内容嗅探：首 4 字节是 `DPS1` 就走 `build_dps_timeline`，
+否则按标准 MIDI 交给 `midly`。两条路最终都产出同一份「绝对时间 + 原始 MIDI 字节」的时间轴，
+因此调度、清音、进度节流全部复用。
 
 ## 技术栈
 
@@ -13,8 +39,8 @@ MIDI 远程控制器。从远程曲库拉取 MIDI 文件，实时推送到本地
 | UI 组件 | shadcn/ui（new-york 风格，`src/components/ui`） |
 | 图标 | lucide-react |
 | 长列表 | `@tanstack/react-virtual`（虚拟滚动，只渲染可视区） |
-| 提示 / 弹窗 | sonner + Radix Dialog |
-| MIDI 解析 | `midly` |
+| 提示 / 弹窗 | sonner + Radix Dialog / Tabs |
+| MIDI 解析 | `midly`（标准 MIDI）+ 自写 DPS1 解析器 |
 | MIDI 输出 | `midir`（Windows 走 WinMM，与 mido/python-rtmidi 同源） |
 | 网络 | `reqwest`（Windows SChannel，无需 OpenSSL） |
 | 更新 | `tauri-plugin-updater`（minisign 签名） |

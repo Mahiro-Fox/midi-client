@@ -1,6 +1,6 @@
 [package]
 name = "midi-client"
-version = "0.0.1"
+version = "0.0.2"
 description = "MIDI 远程控制器"
 authors = ["Mahiro-Fox"]
 edition = "2021"
@@ -27,6 +27,7 @@ reqwest = { version = "0.13", default-features = false, features = [
   "native-tls",
   "json",
   "charset",
+  "query",
 ] }
 tokio = { version = "1", features = ["time"] }
 log = "0.4"

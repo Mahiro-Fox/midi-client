@@ -2,7 +2,7 @@ use std::path::Path;
 
 use tauri::{AppHandle, State};
 
-use crate::midi::{self, Engine, PlaybackState, PortInfo};
+use crate::midi::{self, Engine, MidiPage, PlaybackState, PortInfo, SongPage};
 use crate::updater::{self, UpdateInfo};
 
 #[tauri::command]
@@ -10,9 +10,10 @@ pub fn list_ports() -> Result<Vec<PortInfo>, String> {
     midi::list_ports()
 }
 
+/// 原曲库分页列表（服务端搜索 + 分页）
 #[tauri::command]
-pub async fn list_remote_files() -> Result<Vec<String>, String> {
-    midi::fetch_remote_files().await
+pub async fn list_remote_files(search: String, page: u32, limit: u32) -> Result<MidiPage, String> {
+    midi::fetch_remote_files(&search, page, limit).await
 }
 
 #[tauri::command]
@@ -24,6 +25,35 @@ pub async fn play_remote(
 ) -> Result<(), String> {
     let bytes = midi::download_remote(&file_name).await?;
     engine.play(app, bytes, display_title(&file_name), port_index)
+}
+
+/// 星穹音乐厅曲库分页列表
+#[tauri::command]
+pub async fn list_celestia_songs(
+    q: String,
+    sort: String,
+    offset: u32,
+    limit: u32,
+) -> Result<SongPage, String> {
+    midi::fetch_celestia_songs(&q, &sort, offset, limit).await
+}
+
+/// 播放星穹音乐厅曲目（DPS1 格式，由 Engine 按内容嗅探）
+#[tauri::command]
+pub async fn play_celestia(
+    app: AppHandle,
+    engine: State<'_, Engine>,
+    id: u32,
+    title: String,
+    port_index: usize,
+) -> Result<(), String> {
+    let bytes = midi::download_celestia(id).await?;
+    let name = if title.trim().is_empty() {
+        format!("Celestia #{id}")
+    } else {
+        title
+    };
+    engine.play(app, bytes, name, port_index)
 }
 
 #[tauri::command]
