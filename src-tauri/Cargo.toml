@@ -8,7 +8,7 @@ rust-version = "1.77"
 
 [lib]
 name = "midi_client_lib"
-crate-type = ["lib"]
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -22,7 +22,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 midir = "0.11"
 midly = { version = "0.5", default-features = false, features = ["std", "alloc"] }
-# 用 Windows 自带 SChannel，避免 rustls 引入 ring / aws-lc-rs 所需的 CMake 与 C 构建链
+# Windows 走系统自带的 SChannel，不引入 rustls 的 ring / aws-lc-rs（少一套 C 构建依赖）
 reqwest = { version = "0.13", default-features = false, features = [
   "native-tls",
   "json",

@@ -52,19 +52,17 @@ pub struct ProgressEvent {
 /// 原曲库列表接口允许的最大每页条数（与 Go 端上限一致）。
 const REMOTE_MAX_LIMIT: u32 = 100;
 
-/// 原曲库条目，字段与 Go 端 `MidiFileItem` 对应。
+/// 原曲库条目，字段与 Go 端 `MidiFileItem` 一一对应。
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct MidiFileItem {
     /// 去扩展名的文件名
-    #[serde(default)]
     pub slug: String,
-    #[serde(default)]
     pub name: String,
+    /// 带扩展名的文件名，下载用
     pub file_name: String,
-    #[serde(default)]
     pub size: u64,
-    #[serde(default)]
+    /// RFC3339（UTC）
     pub last_modified: String,
 }
 
@@ -82,13 +80,11 @@ pub struct MidiPage {
     pub items: Vec<MidiFileItem>,
 }
 
+/// `GET /api/midi` 的响应体。
 #[derive(Deserialize)]
 struct RemotePayload {
-    #[serde(default)]
-    files: Vec<serde_json::Value>,
-    /// 老版本部署没有这个字段，需要就地模拟分页
-    #[serde(default)]
-    pagination: Option<RemotePagination>,
+    files: Vec<MidiFileItem>,
+    pagination: RemotePagination,
 }
 
 #[derive(Deserialize)]
@@ -97,9 +93,7 @@ struct RemotePagination {
     page: u32,
     limit: u32,
     total: u32,
-    #[serde(default)]
     total_pages: u32,
-    #[serde(default)]
     has_more: bool,
 }
 
@@ -174,99 +168,6 @@ pub fn list_ports() -> Result<Vec<PortInfo>, String> {
 
 // ---------------------------------------------------------------- 远程曲库
 
-/// 去掉 .mid / .midi 后缀（字节长度相减是安全的：扩展名都是 ASCII）。
-fn strip_ext(file_name: &str) -> String {
-    let lower = file_name.to_lowercase();
-    for ext in [".midi", ".mid"] {
-        if lower.ends_with(ext) {
-            return file_name[..file_name.len() - ext.len()].to_string();
-        }
-    }
-    file_name.to_string()
-}
-
-fn json_str(value: &serde_json::Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-}
-
-/// 归一单个条目，兼容 `"a.mid"` 与 `{"fileName": "a.mid"}` 两种历史格式。
-fn file_item_from_value(value: &serde_json::Value) -> Option<MidiFileItem> {
-    if let Some(file_name) = value.as_str() {
-        let name = strip_ext(file_name);
-        return Some(MidiFileItem {
-            slug: name.clone(),
-            name,
-            file_name: file_name.to_string(),
-            ..Default::default()
-        });
-    }
-
-    let file_name = json_str(value, "fileName")?;
-    let name = json_str(value, "name").unwrap_or_else(|| strip_ext(&file_name));
-    Some(MidiFileItem {
-        slug: json_str(value, "slug").unwrap_or_else(|| name.clone()),
-        name,
-        file_name,
-        size: value.get("size").and_then(serde_json::Value::as_u64).unwrap_or(0),
-        last_modified: json_str(value, "lastModified").unwrap_or_default(),
-    })
-}
-
-/// 老部署一次返回全量数组且没有 `pagination` 字段，这里就地完成过滤与切片，
-/// 让前端拿到的结构与新版接口完全一致（搜索匹配去扩展名的文件名，大小写不敏感）。
-fn page_from_legacy(items: Vec<MidiFileItem>, search: &str, page: u32, limit: u32) -> MidiPage {
-    let needle = search.trim().to_lowercase();
-    let files: Vec<MidiFileItem> = if needle.is_empty() {
-        items
-    } else {
-        items
-            .into_iter()
-            .filter(|item| item.name.to_lowercase().contains(&needle))
-            .collect()
-    };
-
-    let total = files.len() as u32;
-    let total_pages = total.div_ceil(limit).max(1);
-    let page = page.clamp(1, total_pages);
-    let start = (((page - 1) * limit) as usize).min(files.len());
-    let end = start.saturating_add(limit as usize).min(files.len());
-
-    MidiPage {
-        page,
-        limit,
-        total,
-        total_pages: if total == 0 { 0 } else { total_pages },
-        has_more: page < total_pages,
-        items: files[start..end].to_vec(),
-    }
-}
-
-/// 把接口响应转成分页结构：优先信任服务端分页，缺失时回落到本地切片。
-fn page_from_payload(payload: RemotePayload, search: &str, page: u32, limit: u32) -> MidiPage {
-    let items: Vec<MidiFileItem> = payload
-        .files
-        .iter()
-        .filter_map(file_item_from_value)
-        .collect();
-
-    match payload.pagination {
-        Some(p) => MidiPage {
-            page: p.page,
-            limit: p.limit,
-            total: p.total,
-            total_pages: p.total_pages,
-            has_more: p.has_more,
-            items,
-        },
-        None => page_from_legacy(items, search, page, limit),
-    }
-}
-
 /// 拉取原曲库分页：`GET /api/midi?search=&page=&limit=`。
 /// `page` 从 1 开始，`limit` 上限 100（与 Go 端一致）。
 pub async fn fetch_remote_files(search: &str, page: u32, limit: u32) -> Result<MidiPage, String> {
@@ -297,7 +198,14 @@ pub async fn fetch_remote_files(search: &str, page: u32, limit: u32) -> Result<M
         .await
         .map_err(|e| format!("曲库数据解析失败：{e}"))?;
 
-    Ok(page_from_payload(payload, search, page, limit))
+    Ok(MidiPage {
+        page: payload.pagination.page,
+        limit: payload.pagination.limit,
+        total: payload.pagination.total,
+        total_pages: payload.pagination.total_pages,
+        has_more: payload.pagination.has_more,
+        items: payload.files,
+    })
 }
 
 fn remote_url(file_name: &str) -> Result<reqwest::Url, String> {
@@ -876,58 +784,36 @@ mod tests {
         assert!(build_dps_timeline(text).is_err());
     }
 
-    /// 新版接口带 pagination，直接采用服务端的分页结果
+    /// `GET /api/midi` 的响应按 Go 端字段原样解析（camelCase → snake_case）
     #[test]
-    fn payload_uses_server_pagination() {
+    fn remote_payload_parses_server_page() {
         let raw = r#"{
             "success": true,
             "files": [
-                {"slug": "a", "fileName": "a.mid", "name": "a", "size": 10, "lastModified": "2026-11-01T15:01:45Z"},
-                {"slug": "", "fileName": "b.MID", "name": ""}
+                {"slug": "a", "fileName": "a.mid", "name": "a", "size": 19861,
+                 "lastModified": "2026-11-01T15:01:45Z", "path": "/uploads/midisongs/a.mid"},
+                {"slug": "b", "fileName": "b.MID", "name": "b", "size": 7,
+                 "lastModified": "2026-10-01T00:00:00Z"}
             ],
             "pagination": {"page": 2, "limit": 2, "total": 9, "totalPages": 5, "hasMore": true}
         }"#;
         let payload: RemotePayload = serde_json::from_str(raw).expect("应能解析");
-        let page = page_from_payload(payload, "ignored", 2, 2);
 
-        assert_eq!(page.page, 2);
-        assert_eq!(page.total, 9);
-        assert!(page.has_more);
-        assert_eq!(page.items.len(), 2);
-        assert_eq!(page.items[0].file_name, "a.mid");
-        // name 缺失时用去扩展名的文件名兜底
-        assert_eq!(page.items[1].name, "b");
-        assert_eq!(page.items[1].slug, "b");
+        assert_eq!(payload.files.len(), 2);
+        assert_eq!(payload.files[0].file_name, "a.mid");
+        assert_eq!(payload.files[0].size, 19861);
+        assert_eq!(payload.files[1].slug, "b");
+
+        assert_eq!(payload.pagination.page, 2);
+        assert_eq!(payload.pagination.total, 9);
+        assert_eq!(payload.pagination.total_pages, 5);
+        assert!(payload.pagination.has_more);
     }
 
-    /// 老部署没有 pagination：就地过滤 + 切片，保证分页语义一致
+    /// 缺 pagination（旧接口）直接解析失败，不再静默降级
     #[test]
-    fn legacy_payload_slices_locally() {
-        let raw = r#"["Piano Sonata.mid", "Love Story.mid", "love me.MIDI"]"#;
-        let payload: RemotePayload =
-            serde_json::from_str(&format!(r#"{{"files": {raw}}}"#)).expect("应能解析");
-
-        let first = page_from_payload(payload, "LOVE", 1, 2);
-        assert_eq!(first.total, 2);
-        assert_eq!(first.total_pages, 1);
-        assert!(!first.has_more);
-        let titles: Vec<&str> = first.items.iter().map(|i| i.name.as_str()).collect();
-        assert_eq!(titles, ["Love Story", "love me"]);
-
-        // 搜索为空时按 limit 切片，页码越界收敛到最后一页
-        let payload: RemotePayload =
-            serde_json::from_str(&format!(r#"{{"files": {raw}}}"#)).expect("应能解析");
-        let last = page_from_payload(payload, "", 9, 2);
-        assert_eq!(last.page, 2);
-        assert_eq!(last.total, 3);
-        assert!(!last.has_more);
-        assert_eq!(last.items.len(), 1);
-
-        // 越界到 3 页以外仍返回最后一页，且空曲库不会 panic
-        let empty: RemotePayload = serde_json::from_str(r#"{"files": []}"#).expect("应能解析");
-        let page = page_from_payload(empty, "x", 3, 20);
-        assert_eq!(page.total, 0);
-        assert_eq!(page.total_pages, 0);
-        assert!(page.items.is_empty());
+    fn remote_payload_requires_pagination() {
+        let raw = r#"{"files": ["a.mid"]}"#;
+        assert!(serde_json::from_str::<RemotePayload>(raw).is_err());
     }
 }

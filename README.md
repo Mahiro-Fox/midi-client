@@ -15,7 +15,7 @@ MIDI 远程控制器。从远程曲库拉取 MIDI 曲谱，实时推送到本地
 | 星穹音乐厅 | `celestia.chiooone.com/concert/api/songs?q=&sort=&offset=&limit=` | 分页（40/页，共 259 首），服务端搜索与排序，带时长 / 上传者 |
 
 两个源的参数语义不同（原曲库传页码，星穹传条目偏移），`loadTrackPage` 统一按「第几页」调用。
-原曲库接口若还没升级、响应里没有 `pagination` 字段，Rust 侧会就地完成过滤与切片，前端拿到的结构始终一致。
+原曲库响应里的 `pagination` 是必需字段，服务端分页信息直接透给前端，客户端不做二次切片。
 
 星穹音乐厅的曲谱是自定义 **DPS1** 文本格式，不是标准 MIDI 文件：
 
@@ -56,16 +56,15 @@ DPS1\t<id>\t<title>\t<事件数>
 - **播放只认图标**：列表行是不可点的容器，只有右侧播放按钮触发播放，避免误触整行。
 - **新增组件**：`npx shadcn@latest add <name>` 即可，别名 `@/components/ui`；`cn()` 在 `src/lib/utils.ts`。
 
-## 为什么本地用 GNU 工具链
+## 编译环境
 
-开发机没有 MSVC / VS Build Tools，也没有管理员权限，所以**本机**走 `stable-x86_64-pc-windows-gnu`，链接器由便携版 mingw-w64 提供。仓库里**不再**用 `rust-toolchain.toml` 钉死工具链——那会让 CI（runner 自带 MSVC）也被迫下载 gnu 工具链再去找 mingw。现在由 `scripts/run.mjs` 运行时决定：
+Rust 侧固定用 MSVC：`stable-x86_64-pc-windows-msvc`（rustup 在 Windows 上的默认目标），
+链接器来自 Visual Studio Build Tools，不需要额外配置或被 `rust-toolchain.toml` 钉死的工具链。
 
-| 环境 | 检测结果 | 行为 |
-|---|---|---|
-| 开发机 | 找到 `%USERPROFILE%\.mingw64\mingw64\bin` | 前置进 PATH，`RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-gnu` |
-| GitHub Actions | 找不到 mingw | 不干预，cargo 用 runner 默认的 `stable-x86_64-pc-windows-msvc` |
-
-`src-tauri/.cargo/config.toml` 里只有 `[target.x86_64-pc-windows-gnu]` 一节，对 msvc 目标完全无效，所以两种环境共用一份配置。
+```powershell
+# 装过 VS / VS Build Tools（含「使用 C++ 的桌面开发」）即可
+rustup default stable-x86_64-pc-windows-msvc   # 通常已是默认值
+```
 
 ## 快速开始
 
@@ -73,26 +72,14 @@ DPS1\t<id>\t<title>\t<事件数>
 # 1. 安装前端依赖
 npm install
 
-# 2. 安装便携 mingw（仅首次，约 23 个包 / 60 MB）
-npm run setup:mingw
-
-# 3. 开发（热重载）
+# 2. 开发（热重载）
 npm run app:dev
 
-# 4. 打包
+# 3. 打包
 npm run app:build
 ```
 
 产物在 `src-tauri/target/release/bundle/nsis/`。
-
-> `npm run setup:mingw` 从清华 MSYS2 镜像拉取官方包。不用 winlibs 是因为它的
-> GitHub Releases 在国内常被限速到几十 KB/s，263 MB 要跑数小时。
-
-如果想用自己已有的 mingw，设置环境变量后即可（路径里有 `gcc` 就会自动切 gnu 工具链）：
-
-```bash
-MIDICLIENT_MINGW=D:\mingw64\bin npm run app:build
-```
 
 ## 自动更新
 
@@ -132,8 +119,7 @@ git push origin main --tags
 `release.yml` 自动上传安装包、`.exe.sig` 和 `latest.json`。
 客户端「检查更新」读取的正是 `releases/latest/download/latest.json`。
 
-CI 侧和 lan-room 完全一致：**不装 mingw、不切工具链**，就用 `windows-latest` 自带的 MSVC。
-`run.mjs` 找不到 mingw 时会打印「CI / MSVC 模式」并原样调用 tauri，所以同一份脚本在两边都能跑。
+CI 侧同样是 MSVC（`windows-latest` 自带 VS Build Tools），和本地只有一套工具链。
 workflow 里额外加了一步「tag 与 `tauri.conf.json` 版本一致」的校验——版本对不上会让
 `latest.json` 指向错误的安装包，不如在编译前就 fail 掉。
 

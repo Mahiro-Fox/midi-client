@@ -10,7 +10,6 @@
     "tauri": "node scripts/run.mjs",
     "app:dev": "node scripts/run.mjs dev",
     "app:build": "node scripts/run.mjs build",
-    "setup:mingw": "node scripts/setup-mingw.mjs",
     "bump": "node scripts/bump-version.mjs",
     "release:latest": "node scripts/make-latest-json.mjs"
   },

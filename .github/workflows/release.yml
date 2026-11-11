@@ -10,9 +10,8 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
-# 与 lan-room 的 workflow 保持一致：CI 不装 mingw，直接用 runner 自带的 MSVC。
-# windows-gnu + 便携 mingw 只是「本机没有 MSVC」时的替代方案，
-# scripts/run.mjs 检测不到 mingw 就会原样交给 cargo，用默认工具链编译。
+# 本机与 CI 都走 MSVC：runner 自带 VS Build Tools，本地是 rustup 默认的
+# stable-x86_64-pc-windows-msvc，构建链只有这一条。
 jobs:
   build:
     runs-on: windows-latest
