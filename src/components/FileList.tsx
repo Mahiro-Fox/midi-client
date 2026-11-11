@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode, type UIEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type UIEvent,
+} from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Loader2, Play } from "lucide-react";
 
@@ -18,6 +25,10 @@ type Props = {
   onPlay: (item: TrackItem) => void;
   /** 滚动接近底部时触发，用于分页拉取 */
   onReachEnd?: () => void;
+  /** 滚动位置变化，用于切源后恢复（只上报，不参与渲染） */
+  onScrollTop?: (top: number) => void;
+  /** 挂载时要恢复的滚动位置（切回某个源时用） */
+  initialScrollTop?: number;
   /** 列表底部的状态行（加载更多 / 已全部加载） */
   footer?: ReactNode;
   loading?: boolean;
@@ -55,12 +66,16 @@ export default function FileList({
   locateTick,
   onPlay,
   onReachEnd,
+  onScrollTop,
+  initialScrollTop = 0,
   footer,
   loading = false,
   emptyText = "没有匹配的曲目",
 }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [flash, setFlash] = useState(false);
+  /** 恢复位置期间忽略 scroll 事件，避免「一进来就贴着底部」被当成用户想加载更多 */
+  const ignoreScrollUntil = useRef(0);
 
   const virtualizer = useVirtualizer({
     count: items.length,
@@ -68,6 +83,20 @@ export default function FileList({
     estimateSize: () => ROW_HEIGHT,
     overscan: 12,
   });
+
+  // 恢复上次的滚动位置。等列表真正有数据（items 到位、容器高度算出来）再做，
+  // 否则会把 scrollTop 设在旧内容的高度上，被浏览器夹到 0。
+  const restored = useRef(false);
+  useLayoutEffect(() => {
+    if (restored.current) return;
+    const el = scrollRef.current;
+    if (!el || items.length === 0) return;
+    restored.current = true;
+    if (initialScrollTop > 0) {
+      ignoreScrollUntil.current = performance.now() + 200;
+      el.scrollTop = initialScrollTop;
+    }
+  }, [items.length, initialScrollTop]);
 
   // 定位：只处理「还没成功过」的那次请求。
   // 目标行可能因为搜索过滤或分页还没进列表，此时不记为已处理，
@@ -94,8 +123,10 @@ export default function FileList({
   }, [flash]);
 
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {
-    if (!onReachEnd) return;
     const el = event.currentTarget;
+    onScrollTop?.(el.scrollTop);
+    if (!onReachEnd) return;
+    if (performance.now() < ignoreScrollUntil.current) return;
     if (el.scrollHeight - el.scrollTop - el.clientHeight < REACH_END_OFFSET) {
       onReachEnd();
     }
@@ -162,7 +193,7 @@ export default function FileList({
                 </span>
 
                 {item.sub && (
-                  <span className="hidden max-w-[130px] shrink-0 truncate text-[11px] text-muted-foreground/60 sm:inline">
+                  <span className="hidden max-w-32.5 shrink-0 truncate text-[11px] text-muted-foreground/60 sm:inline">
                     {item.sub}
                   </span>
                 )}

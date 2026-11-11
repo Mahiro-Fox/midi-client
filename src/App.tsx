@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import FileList from "@/components/FileList";
 import Header from "@/components/Header";
 import PlayerBar from "@/components/PlayerBar";
+import SettingsDialog from "@/components/SettingsDialog";
 import UpdateDialog from "@/components/UpdateDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +40,7 @@ import {
 } from "@/lib/api";
 import { errorText } from "@/lib/format";
 import { loadTrackPage } from "@/lib/library";
+import { DEFAULT_SETTINGS, getSettings, saveSettings, type Settings } from "@/lib/settings";
 import {
   SOURCES,
   keySource,
@@ -47,8 +49,6 @@ import {
 } from "@/lib/tracks";
 
 const EMPTY_STATE: PlaybackState = { playing: false, title: null, duration: 0 };
-/** 每页条数（原曲库上限 100，星穹上限 100） */
-const PAGE_SIZE = 40;
 /** 搜索防抖：现在是服务端搜索，逐字打接口太浪费 */
 const SEARCH_DELAY = 260;
 
@@ -59,14 +59,62 @@ const SORTS: { value: SongSort; label: string }[] = [
   { value: "long", label: "时长从长到短" },
 ];
 
+const toSource = (value: string): SourceId =>
+  value === "celestia" ? "celestia" : "midisongs";
+
+/** 每个源各自的关键字与排序：切标签时不该带着另一个源的条件重新请求 */
+type SourceFilter = { query: string; sort: SongSort };
+
+/** 每个源缓存一份列表；条件（关键字 / 排序 / 每页条数）一变这份缓存就作废 */
+type CachedList = {
+  query: string;
+  sort: SongSort;
+  pageSize: number;
+  items: TrackItem[];
+  total: number;
+  hasMore: boolean;
+  /** 已加载到第几页（从 1 开始） */
+  page: number;
+  /** 上次的滚动位置，切回来时恢复 */
+  scrollTop: number;
+};
+
 export default function App() {
   const [version, setVersion] = useState("");
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [portIndex, setPortIndex] = useState<number | null>(null);
 
+  /** null 表示还没读到（此时列表不请求，避免用默认值白拉一次） */
+  const [settings, setSettings] = useState<Settings | null>(null);
+  /** 异步回调里要读到最新设置，state 闭包会过期 */
+  const settingsRef = useRef<Settings | null>(null);
+  settingsRef.current = settings;
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   const [source, setSource] = useState<SourceId>("midisongs");
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<SongSort>("new");
+  // 关键字与排序按源各存一份：切标签时不会把 A 源的搜索词带到 B 源，
+  // 也就不会因为条件变化把 B 源的缓存顶掉
+  const [filters, setFilters] = useState<Record<SourceId, SourceFilter>>({
+    midisongs: { query: "", sort: "new" },
+    celestia: { query: "", sort: "new" },
+  });
+  const { query, sort } = filters[source];
+  const setQuery = useCallback(
+    (value: string) =>
+      setFilters((prev) => ({
+        ...prev,
+        [source]: { ...prev[source], query: value },
+      })),
+    [source],
+  );
+  const setSort = useCallback(
+    (value: SongSort) =>
+      setFilters((prev) => ({
+        ...prev,
+        [source]: { ...prev[source], sort: value },
+      })),
+    [source],
+  );
 
   // 两个源都是「服务端搜索 + 分页」，所以共用同一套列表状态
   const [items, setItems] = useState<TrackItem[]>([]);
@@ -81,6 +129,11 @@ export default function App() {
   const listToken = useRef(0);
   /** 点了定位但目标还没加载出来时记在这里，首屏数据到了再决定是否滚过去 */
   const pendingLocate = useRef<string | null>(null);
+  /** 每个源缓存一份列表：切标签直接铺数据，只有点「刷新」才重新请求 */
+  const listCache = useRef(new Map<SourceId, CachedList>());
+  /** 异步回调里要读到最新列表（闭包里的 items 是旧的） */
+  const itemsRef = useRef<TrackItem[]>([]);
+  itemsRef.current = items;
 
   const [state, setState] = useState<PlaybackState>(EMPTY_STATE);
   const [progress, setProgress] = useState<Progress>({ position: 0, duration: 0 });
@@ -96,12 +149,42 @@ export default function App() {
   const [installing, setInstalling] = useState(false);
   const [updatePercent, setUpdatePercent] = useState<number | null>(null);
 
+  const ready = settings !== null;
+  const pageSize = settings?.pageSize ?? DEFAULT_SETTINGS.pageSize;
+
+  /** 局部更新设置：先落内存（界面立刻响应），再交给后端归一化并保存 */
+  const patchSettings = useCallback((patch: Partial<Settings>) => {
+    const current = settingsRef.current;
+    if (!current) return;
+    const next = { ...current, ...patch };
+    settingsRef.current = next;
+    setSettings(next);
+    void saveSettings(next)
+      .then((saved) => {
+        // 后端可能 clamp 过（如每页条数），以后端返回的为准；
+        // 期间用户又改了就不覆盖，等下一轮保存的结果
+        if (settingsRef.current === next) {
+          settingsRef.current = saved;
+          setSettings(saved);
+        }
+      })
+      .catch((error) => toast.error(errorText(error)));
+  }, []);
+
   const refreshPorts = useCallback(async () => {
     try {
       const list = await listPorts();
       setPorts(list);
+      const remembered = settingsRef.current?.rememberPort
+        ? settingsRef.current.portName.trim()
+        : "";
       setPortIndex((prev) => {
         if (prev !== null && list.some((p) => p.index === prev)) return prev;
+        // 上次用的端口还在就接着用它（序号会变，所以按名字找）
+        if (remembered) {
+          const hit = list.find((p) => p.name === remembered);
+          if (hit) return hit.index;
+        }
         const preferred = list.find((p) =>
           /loopmidi|midi\s*through|virtual/i.test(p.name),
         );
@@ -112,55 +195,115 @@ export default function App() {
     }
   }, []);
 
+  // 启动：先读设置（决定默认曲库与端口），再拉端口和播放状态
   useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      let loaded = DEFAULT_SETTINGS;
+      try {
+        loaded = await getSettings();
+      } catch (error) {
+        toast.error(errorText(error));
+      }
+      if (cancelled) return;
+      settingsRef.current = loaded;
+      setSettings(loaded);
+      setSource(toSource(loaded.lastSource));
+      void refreshPorts();
+    })();
+
     void getVersion()
       .then(setVersion)
       .catch(() => setVersion(""));
-    void refreshPorts();
     void getPlaybackState()
       .then((s) => {
         setState(s);
         if (s.duration > 0) setProgress({ position: 0, duration: s.duration });
       })
       .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
   }, [refreshPorts]);
 
-  // 换源时先清空，避免短暂显示另一个曲库的内容
-  useEffect(() => {
-    pageRef.current = 0;
-    pendingLocate.current = null;
-    setItems([]);
-    setTotal(0);
-    setHasMore(false);
-  }, [source]);
+  /** 条件匹配的缓存；没有、或已被「刷新 / 改每页条数」作废时返回 null */
+  const cachedFor = useCallback(
+    (id: SourceId, keyword: string, sortValue: SongSort) => {
+      const entry = listCache.current.get(id);
+      if (!entry) return null;
+      if (entry.pageSize !== pageSize) return null;
+      if (entry.query !== keyword || entry.sort !== sortValue) return null;
+      return entry;
+    },
+    [pageSize],
+  );
 
-  // 首屏 / 条件变化：拉第一页
+  /** 把缓存铺回界面 */
+  const applyCached = useCallback((entry: CachedList) => {
+    pageRef.current = entry.page;
+    setItems(entry.items);
+    setTotal(entry.total);
+    setHasMore(entry.hasMore);
+    setLoading(false);
+    setLoadingMore(false);
+  }, []);
+
+  /** 数据到手（缓存或请求）后处理「定位」：目标在列表里就滚过去 */
+  const settleLocate = useCallback((list: TrackItem[]) => {
+    const target = pendingLocate.current;
+    if (!target) return;
+    pendingLocate.current = null;
+    if (list.some((item) => item.key === target)) {
+      setLocateTick((tick) => tick + 1);
+    } else {
+      toast.info("该曲目不在已加载的列表里，继续向下滚动即可找到");
+    }
+  }, []);
+
+  // 首屏 / 条件变化：命中缓存就直接铺数据，否则才拉第一页。
+  // 强制重新请求只有两个入口：点「刷新」（先删缓存再 bump tick），
+  // 以及改每页条数（pageSize 变了下面对不上，缓存自然失效）。
   useEffect(() => {
+    if (!ready) return;
+
     const token = ++listToken.current;
-    setLoading(true);
-    setHasMore(false);
     // 条件变了，还在飞的「加载更多」已经作废：它的 finally 会因为 token 不符而跳过重置，
     // 这里必须一起清掉，否则列表再也翻不了页
     setLoadingMore(false);
 
+    const keyword = query.trim();
+    const cached = cachedFor(source, keyword, sort);
+
+    if (cached) {
+      applyCached(cached);
+      settleLocate(cached.items);
+      return;
+    }
+
+    setLoading(true);
+    setHasMore(false);
+
     const timer = setTimeout(() => {
-      void loadTrackPage(source, { query, sort, page: 1, limit: PAGE_SIZE })
+      void loadTrackPage(source, { query: keyword, sort, page: 1, limit: pageSize })
         .then((page) => {
           if (token !== listToken.current) return;
           pageRef.current = 1;
           setItems(page.items);
           setTotal(page.total);
           setHasMore(page.hasMore);
-
-          // 点了定位且期间清空过搜索词：数据回来了再决定要不要滚过去
-          const target = pendingLocate.current;
-          if (!target) return;
-          pendingLocate.current = null;
-          if (page.items.some((item) => item.key === target)) {
-            setLocateTick((tick) => tick + 1);
-          } else {
-            toast.info("该曲目不在已加载的列表里，继续向下滚动即可找到");
-          }
+          listCache.current.set(source, {
+            query: keyword,
+            sort,
+            pageSize,
+            items: page.items,
+            total: page.total,
+            hasMore: page.hasMore,
+            page: 1,
+            scrollTop: 0,
+          });
+          settleLocate(page.items);
         })
         .catch((error) => {
           if (token !== listToken.current) return;
@@ -176,25 +319,49 @@ export default function App() {
     }, SEARCH_DELAY);
 
     return () => clearTimeout(timer);
-  }, [source, query, sort, refreshTick]);
+  }, [
+    ready,
+    source,
+    query,
+    sort,
+    refreshTick,
+    pageSize,
+    cachedFor,
+    applyCached,
+    settleLocate,
+  ]);
 
   const loadMore = useCallback(() => {
     if (loading || loadingMore || !hasMore) return;
     const token = listToken.current;
     const nextPage = pageRef.current + 1;
+    const keyword = query.trim();
 
     setLoadingMore(true);
-    void loadTrackPage(source, { query, sort, page: nextPage, limit: PAGE_SIZE })
+    void loadTrackPage(source, { query: keyword, sort, page: nextPage, limit: pageSize })
       .then((page) => {
         if (token !== listToken.current) return;
         pageRef.current = nextPage;
-        setItems((prev) => {
-          // 期间可能有新曲目插到前面，分页边界会重复，按 key 去重
-          const seen = new Set(prev.map((item) => item.key));
-          return [...prev, ...page.items.filter((item) => !seen.has(item.key))];
-        });
+        // 期间可能有新曲目插到前面，分页边界会重复，按 key 去重
+        const seen = new Set(itemsRef.current.map((item) => item.key));
+        const merged = [
+          ...itemsRef.current,
+          ...page.items.filter((item) => !seen.has(item.key)),
+        ];
+        setItems(merged);
         setTotal(page.total);
         setHasMore(page.hasMore);
+        // 追加进来的页也要写回缓存，否则切回来只剩第一页
+        listCache.current.set(source, {
+          query: keyword,
+          sort,
+          pageSize,
+          items: merged,
+          total: page.total,
+          hasMore: page.hasMore,
+          page: nextPage,
+          scrollTop: listCache.current.get(source)?.scrollTop ?? 0,
+        });
       })
       .catch((error) => {
         if (token === listToken.current) toast.error(errorText(error));
@@ -202,7 +369,7 @@ export default function App() {
       .finally(() => {
         if (token === listToken.current) setLoadingMore(false);
       });
-  }, [loading, loadingMore, hasMore, source, query, sort]);
+  }, [loading, loadingMore, hasMore, source, query, sort, pageSize]);
 
   useEffect(() => {
     const disposers: Array<() => void> = [];
@@ -298,11 +465,66 @@ export default function App() {
       return;
     }
     toast.info("该曲目不在已加载的列表里，继续向下滚动即可找到");
-  }, [activeKey, items, query]);
+  }, [activeKey, items, query, setQuery]);
 
   const handleRefresh = useCallback(() => {
+    // 刷新是唯一会强制重新请求的入口：先作废当前源的缓存，再触发首屏 effect。
+    // token 立刻 +1，把可能还在飞的「加载更多」就地作废，别让它追加到新列表里
+    listCache.current.delete(source);
+    listToken.current += 1;
     setRefreshTick((tick) => tick + 1);
-  }, []);
+  }, [source]);
+
+  /** 滚动位置只写进缓存，不触发重渲染 */
+  const handleListScroll = useCallback(
+    (top: number) => {
+      const entry = listCache.current.get(source);
+      if (entry) entry.scrollTop = top;
+    },
+    [source],
+  );
+
+  const handleSourceChange = useCallback(
+    (value: string) => {
+      const next = toSource(value);
+      if (next === source) return;
+      // 上一个源的「加载更多」如果还在飞，立刻作废：否则它的响应会追加到新列表里
+      listToken.current += 1;
+
+      // 切源前先把目标源的缓存铺进 state，和 setSource 在同一批里提交，
+      // 不会出现「标签已经切过去、列表还挂着上一个源」的那一帧
+      const filter = filters[next];
+      const entry = cachedFor(next, filter.query.trim(), filter.sort);
+      pendingLocate.current = null;
+      if (entry) {
+        applyCached(entry);
+      } else {
+        pageRef.current = 0;
+        setItems([]);
+        setTotal(0);
+        setHasMore(false);
+        setLoading(true);
+      }
+      setSource(next);
+
+      // 记住上次浏览的曲库，下次启动直接进这里
+      if (settingsRef.current && settingsRef.current.lastSource !== next) {
+        patchSettings({ lastSource: next });
+      }
+    },
+    [source, filters, cachedFor, applyCached, patchSettings],
+  );
+
+  const handlePortChange = useCallback(
+    (index: number) => {
+      setPortIndex(index);
+      const name = ports.find((port) => port.index === index)?.name;
+      if (name && settingsRef.current?.rememberPort) {
+        patchSettings({ portName: name });
+      }
+    },
+    [ports, patchSettings],
+  );
 
   const handlePickLocal = useCallback(async () => {
     if (!requirePort()) return;
@@ -330,22 +552,27 @@ export default function App() {
     }
   }, [portIndex, requirePort]);
 
-  const handleCheckUpdate = useCallback(async () => {
-    setChecking(true);
-    try {
-      const info = await checkUpdate();
-      if (!info) {
-        toast.success(`已是最新版本${version ? `（v${version}）` : ""}`);
-        return;
+  /** silent：启动时自动检查，已是最新就别弹 toast 打扰 */
+  const handleCheckUpdate = useCallback(
+    async (silent = false) => {
+      setChecking(true);
+      try {
+        const info = await checkUpdate();
+        if (!info) {
+          if (!silent) toast.success(`已是最新版本${version ? `（v${version}）` : ""}`);
+          return;
+        }
+        setUpdate(info);
+        setUpdatePercent(null);
+      } catch (error) {
+        // 自动检查失败不打扰用户（常见于没网 / 代理），手动检查才报错
+        if (!silent) toast.error(errorText(error));
+      } finally {
+        setChecking(false);
       }
-      setUpdate(info);
-      setUpdatePercent(null);
-    } catch (error) {
-      toast.error(errorText(error));
-    } finally {
-      setChecking(false);
-    }
-  }, [version]);
+    },
+    [version],
+  );
 
   const handleInstall = useCallback(async () => {
     setInstalling(true);
@@ -356,6 +583,37 @@ export default function App() {
       setInstalling(false);
     }
   }, []);
+
+  // 托盘菜单：设置 / 检查更新
+  // 收进托盘的提示已改用 Windows 原生通知（Rust 侧 toast.rs），窗口藏起来后前端 toast 看不见
+  useEffect(() => {
+    const disposers: Array<() => void> = [];
+    let active = true;
+
+    void (async () => {
+      const registered = await Promise.all([
+        listen("tray://settings", () => setSettingsOpen(true)),
+        listen("tray://check-update", () => void handleCheckUpdate()),
+      ]);
+      if (active) disposers.push(...registered);
+      else registered.forEach((dispose) => dispose());
+    })();
+
+    return () => {
+      active = false;
+      disposers.forEach((dispose) => dispose());
+    };
+  }, [handleCheckUpdate]);
+
+  // 启动后按设置自动检查一次更新
+  const autoChecked = useRef(false);
+  useEffect(() => {
+    if (!ready || autoChecked.current) return;
+    autoChecked.current = true;
+    if (!settings?.autoCheckUpdate) return;
+    const timer = setTimeout(() => void handleCheckUpdate(true), 1200);
+    return () => clearTimeout(timer);
+  }, [ready, settings, handleCheckUpdate]);
 
   const countLabel = `${items.length} / ${total}`;
 
@@ -376,14 +634,13 @@ export default function App() {
           ports={ports}
           portIndex={portIndex}
           version={version}
-          checking={checking}
-          onPortChange={setPortIndex}
+          onPortChange={handlePortChange}
           onRefreshPorts={() => void refreshPorts()}
-          onCheckUpdate={() => void handleCheckUpdate()}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
 
         <div className="flex shrink-0 items-center gap-2 px-4 py-2.5">
-          <Tabs value={source} onValueChange={(value) => setSource(value as SourceId)}>
+          <Tabs value={source} onValueChange={handleSourceChange}>
             <TabsList>
               {SOURCES.map((entry) => (
                 <TabsTrigger key={entry.id} value={entry.id} title={entry.host}>
@@ -409,7 +666,7 @@ export default function App() {
 
           {source === "celestia" && (
             <Select value={sort} onValueChange={(value) => setSort(value as SongSort)}>
-              <SelectTrigger size="sm" className="w-[104px] shrink-0 text-xs">
+              <SelectTrigger size="sm" className="w-26 shrink-0 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent position="popper" sideOffset={6} align="end">
@@ -456,14 +713,17 @@ export default function App() {
         </div>
 
         <FileList
-          // 换源时重挂载，顺带把滚动位置和虚拟列表状态复位
-          key={source}
+          // 换源或刷新时重挂载：换源要复位虚拟列表，刷新要回到顶部（只剩第 1 页，
+          // 留在原来的位置会被夹到列表底部，看起来像是没刷新）
+          key={`${source}:${refreshTick}`}
           items={items}
           activeKey={activeKey}
           playing={state.playing}
           busyKey={busyKey}
           locateTick={locateTick}
           loading={loading}
+          initialScrollTop={listCache.current.get(source)?.scrollTop ?? 0}
+          onScrollTop={handleListScroll}
           onPlay={(item) => void handlePlay(item)}
           onReachEnd={loadMore}
           footer={footer}
@@ -478,6 +738,16 @@ export default function App() {
           busy={busyKey}
           onStop={() => void handleStop()}
           onPickLocal={() => void handlePickLocal()}
+        />
+
+        <SettingsDialog
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          settings={settings ?? DEFAULT_SETTINGS}
+          onChange={patchSettings}
+          version={version}
+          checking={checking}
+          onCheckUpdate={() => void handleCheckUpdate()}
         />
 
         <UpdateDialog

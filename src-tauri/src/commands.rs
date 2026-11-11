@@ -3,6 +3,7 @@ use std::path::Path;
 use tauri::{AppHandle, State};
 
 use crate::midi::{self, Engine, MidiPage, PlaybackState, PortInfo, SongPage};
+use crate::settings::{self, Settings, SettingsState};
 use crate::updater::{self, UpdateInfo};
 
 #[tauri::command]
@@ -90,6 +91,25 @@ pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> 
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
     updater::install(app).await
+}
+
+#[tauri::command]
+pub fn get_settings(state: State<'_, SettingsState>) -> Settings {
+    state.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// 前端每次改动都整份提交，后端归一化后再落盘并更新内存副本
+#[tauri::command]
+pub fn save_settings(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    next: Settings,
+) -> Result<Settings, String> {
+    let mut normalized = next;
+    normalized.normalize();
+    settings::save(&app, &normalized)?;
+    *state.0.lock().unwrap_or_else(|e| e.into_inner()) = normalized.clone();
+    Ok(normalized)
 }
 
 /// 去掉扩展名作为界面标题

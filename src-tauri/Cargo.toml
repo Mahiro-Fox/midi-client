@@ -1,6 +1,6 @@
 [package]
 name = "midi-client"
-version = "0.0.2"
+version = "0.0.3"
 description = "MIDI 远程控制器"
 authors = ["Mahiro-Fox"]
 edition = "2021"
@@ -14,10 +14,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# tray-icon：系统托盘；image-png：从内嵌 PNG 兜底构造托盘图标
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-dialog = "2"
+# 收进托盘时用 Windows 原生通知告知用户（界面里的 toast 在窗口藏起来后看不见）
+tauri-plugin-notification = "2"
+# 托盘应用只能有一个实例，否则会出现两个托盘图标抢同一个 MIDI 端口
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 midir = "0.11"

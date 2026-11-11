@@ -1,4 +1,4 @@
-import { RefreshCw, Sparkles } from "lucide-react";
+import { RefreshCw, Settings } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,20 +17,18 @@ type Props = {
   ports: PortInfo[];
   portIndex: number | null;
   version: string;
-  checking: boolean;
   onPortChange: (index: number) => void;
   onRefreshPorts: () => void;
-  onCheckUpdate: () => void;
+  onOpenSettings: () => void;
 };
 
 export default function Header({
   ports,
   portIndex,
   version,
-  checking,
   onPortChange,
   onRefreshPorts,
-  onCheckUpdate,
+  onOpenSettings,
 }: Props) {
   const hasPorts = ports.length > 0;
 
@@ -98,10 +96,19 @@ export default function Header({
           <TooltipContent side="bottom">刷新端口列表</TooltipContent>
         </Tooltip>
 
-        <Button variant="outline" size="sm" onClick={onCheckUpdate} disabled={checking}>
-          <Sparkles className={checking ? "animate-pulse" : undefined} />
-          {checking ? "检查中" : "检查更新"}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              onClick={onOpenSettings}
+              aria-label="设置"
+            >
+              <Settings />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">设置</TooltipContent>
+        </Tooltip>
       </div>
     </header>
   );

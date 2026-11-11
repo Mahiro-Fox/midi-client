@@ -2,7 +2,7 @@
 
 MIDI 远程控制器。从远程曲库拉取 MIDI 曲谱，实时推送到本地 MIDI 输出端口（如 loopMIDI 虚拟端口），供 DAW / 软音源发声。
 
-这是原 Python（tkinter + mido）版本的完整重写：界面换成 React + Tailwind，播放引擎换成 Rust，并加入自动更新。
+这是原 Python（tkinter + mido）版本的完整重写：界面换成 React + Tailwind，播放引擎换成 Rust，并加入系统托盘、设置面板与自动更新。
 
 ## 曲库来源
 
@@ -16,6 +16,25 @@ MIDI 远程控制器。从远程曲库拉取 MIDI 曲谱，实时推送到本地
 
 两个源的参数语义不同（原曲库传页码，星穹传条目偏移），`loadTrackPage` 统一按「第几页」调用。
 原曲库响应里的 `pagination` 是必需字段，服务端分页信息直接透给前端，客户端不做二次切片。
+
+### 按源缓存
+
+`App.tsx` 的 `listCache` 给每个源存一份「已加载到第几页 + 滚动位置」，切换标签直接铺数据、
+发请求为零；只有两种情况会重新请求：
+
+| 触发 | 原因 |
+|---|---|
+| 点「刷新」 | 先删掉当前源的缓存再触发首屏 effect（唯一的手动入口） |
+| 换关键字 / 排序 / 每页条数 | 缓存里记着这三项，对不上就当作没有缓存 |
+
+关键字与排序是**按源各存一份**的（`filters`）。共用一份的话，在 A 源里搜过的词会带到 B 源，
+B 源的缓存立刻对不上条件、等于白存——切标签又变成一次请求。代价是切标签时搜索框会换成
+该源自己的内容，这是刻意的。
+
+缓存对象里还留着上次的 `scrollTop`，切回来时由 `FileList` 的 `initialScrollTop` 在
+`useLayoutEffect` 里恢复（等 `items` 到位再设，否则会被旧内容的高度夹到 0）；恢复期间
+200 ms 内忽略 `scroll`，避免「一进来就贴着底部」被误判成用户想加载下一页。
+刷新时列表会重挂载回到顶部——只剩第 1 页，留在原位置会被夹到列表底部，看着像没刷新。
 
 星穹音乐厅的曲谱是自定义 **DPS1** 文本格式，不是标准 MIDI 文件：
 
@@ -44,6 +63,9 @@ DPS1\t<id>\t<title>\t<事件数>
 | MIDI 输出 | `midir`（Windows 走 WinMM，与 mido/python-rtmidi 同源） |
 | 网络 | `reqwest`（Windows SChannel，无需 OpenSSL） |
 | 更新 | `tauri-plugin-updater`（minisign 签名） |
+| 系统通知 | `tauri-plugin-notification`（Windows 通知中心） |
+| 托盘 / 单实例 | `tauri` 的 `tray-icon` feature + `tauri-plugin-single-instance` |
+| 设置持久化 | 自写 `settings.rs`（config 目录下的 `settings.json`） |
 
 ## 界面结构
 
@@ -55,6 +77,33 @@ DPS1\t<id>\t<title>\t<事件数>
   这样目标行还没挂载也能滚到位，随后叠一层 1.25s 光圈提示。
 - **播放只认图标**：列表行是不可点的容器，只有右侧播放按钮触发播放，避免误触整行。
 - **新增组件**：`npx shadcn@latest add <name>` 即可，别名 `@/components/ui`；`cn()` 在 `src/lib/utils.ts`。
+
+## 托盘与设置
+
+托盘实现照搬 lan-room（`src-tauri/src/tray.rs`）：左键唤起窗口，右键出菜单。
+
+| 菜单项 | 行为 |
+|---|---|
+| 打开主界面 | 显示 + 取消最小化 + 聚焦 |
+| 停止播放 | 直接调 `Engine::stop()`，不走前端 |
+| 设置… | 唤起窗口并发出 `tray://settings`，前端打开设置弹窗 |
+| 检查更新 | 唤起窗口并发出 `tray://check-update` |
+| 退出 midi-client | 先停播（发 CC123 清音）再 `exit(0)` |
+
+- **单实例**：`tauri-plugin-single-instance` 必须最先注册。托盘应用重复启动会出现两个图标抢同一个
+  MIDI 端口，所以第二次启动只唤起已有窗口。
+- **关窗行为**：`on_window_event` 里读设置决定 `prevent_close + hide` 还是真正退出。收进托盘时默认
+  **继续播放**（挂着听），并弹一条 **Windows 原生通知**（`src-tauri/src/toast.rs`，走
+  `tauri-plugin-notification`）说明「已最小化到系统托盘」。窗口一藏起来，界面内的 sonner toast 就
+  没人看得见，所以这里只能交给系统通知中心；通知由系统渲染，在 `hide()` 之前发出去即可，
+  不再需要以前「先亮 700 ms 再隐藏」那套。
+- **设置存储**：`%APPDATA%\cn.mahirooyama.midi-client\settings.json`，改动即时落盘；
+  Rust 侧 `settings::Settings` 与前端 `src/lib/settings.ts` 字段一一对应（camelCase）。
+  `save_settings` 会先归一化（每页条数 clamp 到 20–100、端口名去空白、曲库 id 白名单）再写盘并返回，
+  前端以后端返回值为准。
+- **设置项**：关闭时最小化到托盘 / 收进托盘时停止播放 / 记住上次的输出端口（按**端口名**记，
+  序号重启会变）/ 每页条数 / 启动时自动检查更新 / 手动检查更新（更新入口已从标题栏移进设置）。
+- 输出端口与上次浏览的曲库也会自动记住（`portName` / `lastSource`），这两个没有开关，属于隐式偏好。
 
 ## 编译环境
 
@@ -145,5 +194,5 @@ workflow 里额外加了一步「tag 与 `tauri.conf.json` 版本一致」的校
 
 - **进度事件节流**：`playback://progress` 每 100 ms 最多发一次。原始实现每发一条 MIDI 消息就刷一次 UI，在 Tauri 里跨进程序列化会被打成 IPC 洪水。
 - **绝对时间调度**：不按 delta 逐条 `sleep`，而是记录起点、睡到绝对目标时刻，避免误差累积；Windows 定时器精度默认 15.6 ms，末尾 2 ms 改为自旋等待。
-- **防卡音符**：停止、出错、关窗时都会对 16 个通道发 CC123（All Notes Off）、CC121 和弯音回中，避免软音源留下长音。
+- **防卡音符**：停止、出错、关窗/托盘退出时都会对 16 个通道发 CC123（All Notes Off）、CC121 和弯音回中，避免软音源留下长音。
 - **代次校验**：连续切换曲目时，旧播放线程的收尾事件会被丢弃，避免进度条和状态回跳。
